@@ -1,0 +1,2 @@
+/usr/bin/ar qc libcmd_lib.a CMakeFiles/cmd_lib.dir/Cmd.cpp.o CMakeFiles/cmd_lib.dir/Command.cpp.o CMakeFiles/cmd_lib.dir/EthernetFrame.cpp.o
+/usr/bin/ranlib libcmd_lib.a
