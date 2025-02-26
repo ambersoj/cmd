@@ -1,16 +1,22 @@
 #ifndef COMMAND_HPP
 #define COMMAND_HPP
 
-#include <string>
+#include <iostream>
+#include <unordered_map>
+#include <functional>
 
 class Command {
-protected:
-    std::string name;
 public:
-    Command(const std::string& name);
-    virtual ~Command() = default;
-    virtual void run() = 0; // Pure virtual function
-    std::string getName() const { return name; } // Getter for the name
-};
+    using CommandFunction = std::function<void()>;
 
-#endif // COMMAND_HPP
+    Command(std::string name, CommandFunction func);
+
+    void execute() const;
+
+    const std::string getName() const;
+
+private:
+    std::string name;
+    CommandFunction func;
+};
+#endif

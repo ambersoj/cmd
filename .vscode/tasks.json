@@ -1,0 +1,27 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "g++ build active file",
+            "type": "shell",
+            "command": "/usr/bin/g++",
+            "args": [
+                "-g",
+                "${workspaceFolder}/src/*.cpp",
+                "-o",
+                "${workspaceFolder}/bin/my_program",
+                "-I${workspaceFolder}/include",  // Include directory
+                "/usr/include/jsoncpp/json",  // Include directory
+                "-lnet",                         // Linking the net library (replace if needed)
+                "-lpthread",                     // Linking the pthread library
+                "-ljsoncpp"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "Generated task to build the project"
+        }
+    ]
+}

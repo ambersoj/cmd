@@ -1,6 +1,6 @@
 file(REMOVE_RECURSE
-  "../bin/test_command"
-  "../bin/test_command.pdb"
+  "/usr/local/cmd/bin/test_command"
+  "/usr/local/cmd/bin/test_command.pdb"
   "CMakeFiles/test_command.dir/test_command.cpp.o"
   "CMakeFiles/test_command.dir/test_command.cpp.o.d"
 )

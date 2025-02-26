@@ -1,6 +1,6 @@
 file(REMOVE_RECURSE
-  "../bin/test_ethernetframe"
-  "../bin/test_ethernetframe.pdb"
+  "/usr/local/cmd/bin/test_ethernetframe"
+  "/usr/local/cmd/bin/test_ethernetframe.pdb"
   "CMakeFiles/test_ethernetframe.dir/test_ethernetframe.cpp.o"
   "CMakeFiles/test_ethernetframe.dir/test_ethernetframe.cpp.o.d"
 )

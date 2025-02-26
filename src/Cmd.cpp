@@ -1,12 +1,17 @@
 #include "Cmd.hpp"
 #include <iostream>
 
-Cmd::Cmd(const std::string& name) : name(name) {}
-
-std::string Cmd::getName() const {
-    return name;
+void Cmd::addCommand(const std::string& name, Command::CommandFunction func) {
+    auto [it, inserted] = commands.try_emplace(name, name, std::move(func));
+    if (!inserted) {
+        std::cerr << "Command '" << name << "' already exists.\n";
+    }
 }
 
-void Cmd::execute() const {
-    std::cout << "Executing command: " << name << std::endl;
+void Cmd::executeCommand(const std::string& name) const {
+    if (auto it = commands.find(name); it != commands.end()) {
+        it->second.execute();
+    } else {
+        std::cerr << "Command not found: " << name << std::endl;
+    }
 }
