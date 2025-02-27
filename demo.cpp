@@ -12,6 +12,7 @@
 #include "./Observer.hpp"
 #include <pcap.h>
 #include <libnet.h>
+#include <conio.h/conio.h>
 
 // Function to create a TAP device
 std::string createTapDevice(const std::string& tapName) {
@@ -64,16 +65,8 @@ int main() {
         // Attach Observers
         dce1->attach(observer1);
         dce2->attach(observer2);
-        
-        std::vector<uint8_t> packet1 = observer1->getNextPacket();
-        if (!packet1.empty()) {
-            std::cout << "Processing packet from TAP 1, size: " << packet1.size() << " bytes" << std::endl;
-        }
 
-        std::vector<uint8_t> packet2 = observer2->getNextPacket();
-        if (!packet2.empty()) {
-            std::cout << "Processing packet from TAP 2, size: " << packet2.size() << " bytes" << std::endl;
-        }
+        std::vector<uint8_t> packet1 = observer1->getNextPacket();
 
         std::cout << "DCE is running. Press Enter to exit..." << std::endl;
 
@@ -81,7 +74,23 @@ int main() {
         dce1->startCapture();
         dce2->startCapture();
 
-        std::cin.get();
+        bool running = true;
+        int i = 100;
+        while(--i)
+        {
+            sleep(1);
+            std::vector<uint8_t> packet1 = observer1->getNextPacket();
+
+            if (!packet1.empty()) {
+                std::cout << "Processing packet from TAP 1, size: " << packet1.size() << " bytes" << std::endl;
+            }
+
+            std::vector<uint8_t> packet2 = observer2->getNextPacket();
+            if (!packet2.empty()) {
+                std::cout << "Processing packet from TAP 2, size: " << packet2.size() << " bytes" << std::endl;
+            }
+
+        }
 
         // Stop packet capture
         dce1->stopCapture();

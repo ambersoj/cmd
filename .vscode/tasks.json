@@ -12,6 +12,7 @@
                 "${workspaceFolder}/demo",
                 "-I${workspaceFolder}/include",
                 "-I/usr/include/jsoncpp",   // Corrected JSON include path
+                "-I/usr/include/conio.h",   // Corrected JSON include path
                 "-L/usr/lib",               // Add this if needed
                 "-lnet",
                 "-lpcap",
