@@ -419,3 +419,23 @@ likely because there was no tap created for it to be applied to as dev.  What yo
 /////////////////
 
 It works really well.  But it gets lost in the pcap_loop though. So the program never terminates, it goes into start capture and stays there.  The taps are getting created and capture real traffic as confirmed by wireshark.  Do those pcap_loops need to be put in their own threads or something?
+
+
+//////////////////
+
+
+Oh it's a thing of beauty now.  It's very exciting.  I've got a Command pattern in the cmd code base that I'm aching to point at the DTE part of cmd the way you and I just pointed the DCE part of the code at the rx buffers.
+
+I've got a question.  Is this part of the code in Observer:
+
+class RxObserver : public IObserver {
+public:
+    void update(const std::vector<uint8_t>& packet) override {
+        // Process received packet
+        std::cout << "RxObserver received packet of size: " << packet.size() << " bytes" << std::endl;
+    }
+};
+
+where in practice the rx buffer could be written with packet, or a part of packet, like packet.size() instead of just being printed out with std::cout, like in the code and the example above?  Would it be the proper use of to write the packets to their respective rx buffers, instead of just printing out a message?
+
+And I was wondering if in that code there are two taps and they each have an observer and they could both be connected to individual rx buffers.

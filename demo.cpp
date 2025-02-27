@@ -65,6 +65,16 @@ int main() {
         dce1->attach(observer1);
         dce2->attach(observer2);
         
+        std::vector<uint8_t> packet1 = observer1->getNextPacket();
+        if (!packet1.empty()) {
+            std::cout << "Processing packet from TAP 1, size: " << packet1.size() << " bytes" << std::endl;
+        }
+
+        std::vector<uint8_t> packet2 = observer2->getNextPacket();
+        if (!packet2.empty()) {
+            std::cout << "Processing packet from TAP 2, size: " << packet2.size() << " bytes" << std::endl;
+        }
+
         std::cout << "DCE is running. Press Enter to exit..." << std::endl;
 
         // Start packet capture

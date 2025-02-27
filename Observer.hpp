@@ -4,6 +4,9 @@
 #include <vector>
 #include <memory>
 #include <iostream>
+#include <queue>
+#include <mutex>
+
 
 // Observer Interface
 class IObserver {
@@ -23,10 +26,25 @@ public:
 
 // Concrete Observer
 class RxObserver : public IObserver {
+private:
+    std::queue<std::vector<uint8_t>> rxBuffer;
+    std::mutex bufferMutex;
+
 public:
     void update(const std::vector<uint8_t>& packet) override {
-        // Process received packet
+        std::lock_guard<std::mutex> lock(bufferMutex);
+        rxBuffer.push(packet);  // Store the packet in the RX buffer
         std::cout << "RxObserver received packet of size: " << packet.size() << " bytes" << std::endl;
+    }
+
+    std::vector<uint8_t> getNextPacket() {
+        std::lock_guard<std::mutex> lock(bufferMutex);
+        if (!rxBuffer.empty()) {
+            std::vector<uint8_t> packet = rxBuffer.front();
+            rxBuffer.pop();
+            return packet;
+        }
+        return {};  // Return an empty packet if buffer is empty
     }
 };
 
