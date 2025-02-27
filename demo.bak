@@ -1,4 +1,4 @@
-#include "./DCE.hpp"
+#include "DCE.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <cstring>
@@ -8,10 +8,6 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <cstdlib>
-#include <memory>
-#include "./Observer.hpp"
-#include <pcap.h>
-#include <libnet.h>
 
 // Function to create a TAP device
 std::string createTapDevice(const std::string& tapName) {
@@ -45,42 +41,17 @@ int main() {
         std::string tap1 = createTapDevice("tap0");
         std::string tap2 = createTapDevice("tap1");
 
-        // Initialize libnet
-        char errbuf[LIBNET_ERRBUF_SIZE];
-        libnet_t *lnet1 = libnet_init(LIBNET_RAW4, tap1.c_str(), errbuf);
-        libnet_t *lnet2 = libnet_init(LIBNET_RAW4, tap2.c_str(), errbuf);
-        if (!lnet1 || !lnet2) {
-            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
-        }
+        DCE dce1(tap1);
+        DCE dce2(tap2);
 
-        // Create DCE instances for each TAP device
-        auto dce1 = std::make_shared<DCE>(tap1);
-        auto dce2 = std::make_shared<DCE>(tap2);
+        dce1.startCapture();
+        dce2.startCapture();
 
-        // Create Observers for each DCE instance
-        auto observer1 = std::make_shared<RxObserver>();
-        auto observer2 = std::make_shared<RxObserver>();
-
-        // Attach Observers
-        dce1->attach(observer1);
-        dce2->attach(observer2);
-        
         std::cout << "DCE is running. Press Enter to exit..." << std::endl;
-
-        // Start packet capture
-        dce1->startCapture();
-        dce2->startCapture();
-
         std::cin.get();
 
-        // Stop packet capture
-        dce1->stopCapture();
-        dce2->stopCapture();
-
-        // Cleanup libnet
-        libnet_destroy(lnet1);
-        libnet_destroy(lnet2);
-
+        dce1.stopCapture();
+        dce2.stopCapture();
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return EXIT_FAILURE;

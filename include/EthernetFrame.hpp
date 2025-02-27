@@ -1,27 +1,30 @@
-// EthernetFrame.hpp
 #ifndef ETHERNETFRAME_HPP
 #define ETHERNETFRAME_HPP
 
 #include <array>
 #include <vector>
-#include <cstdint>
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <stdexcept>
+#include <cstdint>
 
 class EthernetFrame {
 public:
-    EthernetFrame();
-    EthernetFrame(const std::array<uint8_t, 6>& src, const std::array<uint8_t, 6>& dst, const std::vector<uint8_t>& data);
+    EthernetFrame(const std::array<uint8_t, 6>& srcMac, 
+                  const std::array<uint8_t, 6>& dstMac, 
+                  const std::vector<uint8_t>& payload);
+
     std::vector<uint8_t> serialize() const;
-    EthernetFrame deserialize(const std::vector<uint8_t>& data);
+    static EthernetFrame deserialize(const std::vector<uint8_t>& data);
+
     void setSrcMac(const std::array<uint8_t, 6>& mac);
     void setDstMac(const std::array<uint8_t, 6>& mac);
     void setPayload(const std::vector<uint8_t>& data);
     
     const std::array<uint8_t, 6>& getSrcMac() const;
     const std::array<uint8_t, 6>& getDstMac() const;
-    std::vector<uint8_t>& getPayload();
+    const std::vector<uint8_t>& getPayload() const;  // Prevent accidental modification
     
     std::string macToString(const std::array<uint8_t, 6>& mac) const;
     static std::array<uint8_t, 6> stringToMac(const std::string& macStr);
@@ -32,4 +35,4 @@ private:
     std::vector<uint8_t> payload;
 };
 
-#endif // ETHERNETFRAME_HPP
+#endif

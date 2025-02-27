@@ -7,13 +7,15 @@
             "command": "/usr/bin/g++",
             "args": [
                 "-g",
-                "${workspaceFolder}/src/*.cpp",
+                "${workspaceFolder}/demo.cpp",
                 "-o",
-                "${workspaceFolder}/bin/my_program",
-                "-I${workspaceFolder}/include",  // Include directory
-                "/usr/include/jsoncpp/json",  // Include directory
-                "-lnet",                         // Linking the net library (replace if needed)
-                "-lpthread",                     // Linking the pthread library
+                "${workspaceFolder}/demo",
+                "-I${workspaceFolder}/include",
+                "-I/usr/include/jsoncpp",   // Corrected JSON include path
+                "-L/usr/lib",               // Add this if needed
+                "-lnet",
+                "-lpcap",
+                "-lpthread",
                 "-ljsoncpp"
             ],
             "group": {

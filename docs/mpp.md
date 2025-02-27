@@ -61,4 +61,33 @@
 - There is no lgging nor error handling nor debugging mechanism.
 - What happens if a tx destination is invalid?  I don't know.  That's the user's concern, not ours and not the component's.
 
+///////////////////////////
+
+Hey do you think you could help with this output from 
+g++ -o demo demo.cpp -Iusr/include/jsoncpp/json -lnet -lpcap -ljsoncpp
+
+root@PRED:/usr/local/cmd# g++ -o demo demo.cpp -Iusr/include/jsoncpp/json -lnet -lpcap -ljsoncpp
+In file included from demo.cpp:1:
+./DCE.hpp: In member function ‘virtual void DCE::detach(std::shared_ptr<IObserver>)’:
+./DCE.hpp:46:52: error: cannot convert ‘std::vector<std::shared_ptr<IObserver> >::iterator’ to ‘const char*’
+   46 |         observers.erase(std::remove(observers.begin(), observers.end(), observer), observers.end());
+      |                                     ~~~~~~~~~~~~~~~^~
+      |                                                    |
+      |                                                    std::vector<std::shared_ptr<IObserver> >::iterator
+In file included from /usr/include/c++/13/cstdio:42,
+                 from /usr/include/c++/13/ext/string_conversions.h:45,
+                 from /usr/include/c++/13/bits/basic_string.h:4109,
+                 from /usr/include/c++/13/string:54,
+                 from /usr/include/c++/13/bits/locale_classes.h:40,
+                 from /usr/include/c++/13/bits/ios_base.h:41,
+                 from /usr/include/c++/13/ios:44,
+                 from /usr/include/c++/13/ostream:40,
+                 from /usr/include/c++/13/iostream:41,
+                 from ./Observer.hpp:6,
+                 from ./DCE.hpp:4:
+/usr/include/stdio.h:158:32: note:   initializing argument 1 of ‘int remove(const char*)’
+  158 | extern int remove (const char *__filename) __THROW;
+      |                    ~~~~~~~~~~~~^~~~~~~~~~
+root@PRED:/usr/local/cmd# 
+
 

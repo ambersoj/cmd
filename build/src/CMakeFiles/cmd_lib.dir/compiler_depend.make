@@ -501,7 +501,6 @@ src/CMakeFiles/cmd_lib.dir/EthernetFrame.cpp.o: /usr/local/cmd/src/EthernetFrame
   /usr/include/c++/13/cstdint \
   /usr/include/c++/13/cstdio \
   /usr/include/c++/13/cstdlib \
-  /usr/include/c++/13/cstring \
   /usr/include/c++/13/ctime \
   /usr/include/c++/13/cwchar \
   /usr/include/c++/13/cwctype \
@@ -546,8 +545,6 @@ src/CMakeFiles/cmd_lib.dir/EthernetFrame.cpp.o: /usr/local/cmd/src/EthernetFrame
   /usr/include/stdint.h \
   /usr/include/stdio.h \
   /usr/include/stdlib.h \
-  /usr/include/string.h \
-  /usr/include/strings.h \
   /usr/include/time.h \
   /usr/include/wchar.h \
   /usr/include/wctype.h \
@@ -642,15 +639,11 @@ src/CMakeFiles/cmd_lib.dir/EthernetFrame.cpp.o: /usr/local/cmd/src/EthernetFrame
 
 /usr/lib/gcc/x86_64-linux-gnu/13/include/stdint.h:
 
-/usr/include/string.h:
-
 /usr/include/stdint.h:
 
 /usr/include/c++/13/sstream:
 
 /usr/include/c++/13/ctime:
-
-/usr/include/c++/13/cstring:
 
 /usr/include/c++/13/bits/locale_facets_nonio.tcc:
 
@@ -725,8 +718,6 @@ src/CMakeFiles/cmd_lib.dir/EthernetFrame.cpp.o: /usr/local/cmd/src/EthernetFrame
 /usr/include/x86_64-linux-gnu/bits/timesize.h:
 
 /usr/include/x86_64-linux-gnu/bits/time.h:
-
-/usr/include/strings.h:
 
 /usr/include/x86_64-linux-gnu/bits/struct_rwlock.h:
 
