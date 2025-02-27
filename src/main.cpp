@@ -45,36 +45,36 @@ std::string createTapDevice(const std::string& tapName) {
 
 int main() {
     try {
-        std::string tap1 = createTapDevice("tap0");
-        std::string tap2 = createTapDevice("tap1");
+        std::string tap0 = createTapDevice("tap0");
+        std::string tap1 = createTapDevice("tap1");
 
         // Initialize libnet
         char errbuf[LIBNET_ERRBUF_SIZE];
-        libnet_t *lnet1 = libnet_init(LIBNET_RAW4, tap1.c_str(), errbuf);
-        libnet_t *lnet2 = libnet_init(LIBNET_RAW4, tap2.c_str(), errbuf);
-        if (!lnet1 || !lnet2) {
+        libnet_t *lnet0 = libnet_init(LIBNET_LINK, tap0.c_str(), errbuf);
+        libnet_t *lnet1 = libnet_init(LIBNET_LINK, tap1.c_str(), errbuf);
+        if (!lnet0 || !lnet1) {
             throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
         }
 
         // Create DCE instances for each TAP device
+        auto dce0 = std::make_shared<DCE>(tap0);
         auto dce1 = std::make_shared<DCE>(tap1);
-        auto dce2 = std::make_shared<DCE>(tap2);
 
         // Create Observers for each DCE instance
+        auto observer0 = std::make_shared<RxObserver>();
         auto observer1 = std::make_shared<RxObserver>();
-        auto observer2 = std::make_shared<RxObserver>();
 
         // Attach Observers
+        dce0->attach(observer0);
         dce1->attach(observer1);
-        dce2->attach(observer2);
 
         // Start packet capture
- //       dce1->startCapture();
- //       dce2->startCapture();
+        dce0->startCapture();
+        dce1->startCapture();
 
         // Command execution setup
         Cmd commandProcessor;
-        commandProcessor.addCommand("dce_transmit", [&dce1](const std::vector<std::string>& args) {
+        commandProcessor.addCommand("dce_transmit", [&dce0](const std::vector<std::string>& args) {
             if (args.size() < 3) {
                 std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
                 return;
@@ -89,24 +89,28 @@ int main() {
             sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
             
             EthernetFrame frame(srcMac, dstMac, payload);
-            dce1->transmitFrame(frame);
+            dce0->transmitFrame(frame);
             std::cout << "Transmitted data: " << args[2] << std::endl;
         });
 
         std::cout << "DCE is running.\nEnter command: " << std::endl;
         std::string input;
         while (std::getline(std::cin, input)) {
+            if(input == "exit")
+            {
+                break;
+            }
             commandProcessor.executeCommand(input);
             std::cout << "Enter command: " << std::endl;
         }
 
         // Stop packet capture
+        dce0->stopCapture();
         dce1->stopCapture();
-        dce2->stopCapture();
 
         // Cleanup libnet
+        libnet_destroy(lnet0);
         libnet_destroy(lnet1);
-        libnet_destroy(lnet2);
 
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << std::endl;
