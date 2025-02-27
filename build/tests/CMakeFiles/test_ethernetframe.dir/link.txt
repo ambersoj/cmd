@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_ethernetframe.dir/test_ethernetframe.cpp.o -o /usr/local/cmd/bin/test_ethernetframe  ../src/libcmd_lib.a -lpthread -lnet 

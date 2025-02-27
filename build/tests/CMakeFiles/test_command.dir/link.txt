@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/test_command.dir/test_command.cpp.o -o /usr/local/cmd/bin/test_command  ../src/libcmd_lib.a -lpthread -lnet 

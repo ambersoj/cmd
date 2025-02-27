@@ -7,13 +7,15 @@
             "command": "/usr/bin/g++",
             "args": [
                 "-g",
-                "${workspaceFolder}/demo.cpp",
-                "${workspaceFolder}/Cmd.cpp",
-                "${workspaceFolder}/Command.cpp",
-                "${workspaceFolder}/EthernetFrame.cpp",
+                "${workspaceFolder}/src/main.cpp",
+                "${workspaceFolder}/src/Cmd.cpp",
+                "${workspaceFolder}/src/Command.cpp",
+                "${workspaceFolder}/src/EthernetFrame.cpp",
+                "${workspaceFolder}/src/RxObserver.cpp",
+                "${workspaceFolder}/src/DCE.cpp",
                 "-o",
-                "${workspaceFolder}/demo",
-                "-I${workspaceFolder}",
+                "${workspaceFolder}/cmd",
+                "-I${workspaceFolder}/include",
                 "-I/usr/include/jsoncpp",   // Corrected JSON include path
                 "-L/usr/lib",               // Add this if needed
                 "-lnet",

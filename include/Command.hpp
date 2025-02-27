@@ -7,11 +7,11 @@
 
 class Command {
 public:
-    using CommandFunction = std::function<void()>;
+    using CommandFunction = std::function<void(const std::vector<std::string>&)>;
 
     Command(std::string name, CommandFunction func);
 
-    void execute() const;
+    void execute(const std::vector<std::string>& args) const;
 
     const std::string getName() const;
 

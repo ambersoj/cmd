@@ -8,9 +8,8 @@ Command::Command(std::string name, CommandFunction func)
     }
 }
 
-
-void Command::execute() const {
-        func();
+void Command::execute(const std::vector<std::string>& args) const {
+    func(args);
 }
 
 const std::string Command::getName() const {
