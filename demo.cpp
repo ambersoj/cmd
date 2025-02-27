@@ -69,8 +69,8 @@ int main() {
         dce2->attach(observer2);
 
         // Start packet capture
-        dce1->startCapture();
-        dce2->startCapture();
+ //       dce1->startCapture();
+ //       dce2->startCapture();
 
         // Command execution setup
         Cmd commandProcessor;
@@ -93,7 +93,7 @@ int main() {
             std::cout << "Transmitted data: " << args[2] << std::endl;
         });
 
-        std::cout << "DCE is running. Enter command: " << std::endl;
+        std::cout << "DCE is running.\nEnter command: " << std::endl;
         std::string input;
         while (std::getline(std::cin, input)) {
             commandProcessor.executeCommand(input);

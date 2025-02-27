@@ -771,3 +771,182 @@ In file included from /usr/include/c++/13/functional:59,
       |       ^~~~~~~~
 /usr/include/c++/13/bits/std_function.h:587:7: note:   candidate expects 1 argument, 0 provided
 root@PRED:/usr/local/cmd# 
+
+////////////////////
+
+I hope you can help me getting the dce_transmit function to get through the sorting process and actually execute the command.  You see the system will perform addCommand("name", func_ptr) but at the time it runs with the arguments it compares the whole line to the "name" like this:
+
+"dce_transmit 11:22:33:44:55:66 aa:bb:cc:dd:ee:ff \"Hello world!!\""
+
+So I get command not found, of course.
+
+/////////////////
+
+There's some sort of issue with istringstream and this error is beyond my understanding.  Is there a simple remedy?
+
+Cmd.cpp: In member function ‘void Cmd::executeCommand(const std::string&) const’:
+Cmd.cpp:12:32: error: variable ‘std::istringstream iss’ has initializer but incomplete type
+   12 |     std::istringstream iss(name);
+      |                                ^
+Cmd.cpp:23:27: error: no matching function for call to ‘Command::execute(std::vector<std::__cxx11::basic_string<char> >&) const’
+   23 |         it->second.execute(args);
+      |         ~~~~~~~~~~~~~~~~~~^~~~~~
+In file included from Cmd.hpp:4,
+                 from Cmd.cpp:1:
+Command.hpp:14:10: note: candidate: ‘void Command::execute() const’
+   14 |     void execute() const;
+      |          ^~~~~~~
+Command.hpp:14:10: note:   candidate expects 0 arguments, 1 provided
+
+
+///////////////
+
+Take a closer look at how the user inputs the dce_transmit command and whether quotes are used for arguments or not and how spaces are considered.  With regards to the spaces "Hello World!!" internally to the program splits up the input string, even the payload it seems, at ' ' characters, the space. 
+
+Created TAP device: tap0
+Created TAP device: tap1
+DCE is running.
+Enter command: 
+dce_transmit 11:22:33:44:55:66 aa:bb:cc:dd:ee:ff "Hello World!!"
+
+payload[0] = '"'
+payload[1] = 'H'
+payload[2] = 'e'
+payload[3] = 'l'
+payload[4] = 'l'
+payload[5] = 'o'
+
+srcMac:
+    _M_elems[0] = 17
+    _M_elems[1] = 34
+    _M_elems[2] = 51
+    _M_elems[3] = 68
+    _M_elems[4] = 85
+    _M_elems[5] = 102
+
+- Hey partner I just realized that those elems are multiples of 17, probably unimportant though.
+
+dstMac:
+    _M_elems[0] = 170
+    _M_elems[1] = 187
+    _M_elems[2] = 204
+    _M_elems[3] = 221
+    _M_elems[4] = 238
+    _M_elems[5] = 255
+
+- strange relationship to 17 here too, but probably unimportant unless it's significant to you.
+
+In this DCE code:
+
+    void transmitFrame(const EthernetFrame& frame) {
+        libnet_ptag_t ethernetTag = libnet_build_ethernet(
+            frame.getDstMac().data(), frame.getSrcMac().data(),
+            ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+            lnet, 0
+        );
+
+        if (ethernetTag == -1) {
+            throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
+        }
+
+the ethernetTag is always returned as -1 and this is where I need your help.  Could this usage of libnet ge getting the wrong data?  Could this usage of libnet be conflicting with its initialization - like the diffence between the layer 2 initialization vs layer 3?
+
+////////////////////////
+I've changed the initialization to LIBNET_LINK.  Thanks for the advice.
+
+I'm working with the new parseCommand() function you've sent and it has some behaior we'll have to iron out.
+
+First of all the input is:
+
+R"(dce_transmit 11:22:33:44:55:66 aa:bb:cc:dd:ee:ff "Hello World!!")"
+
+in the main() of that parseCommand() file that I call input.cpp.  But on the terminal prompt how am I expected to use quotes and '(' and ')' to work with demo.cpp and the dce_transmit command when I'm running it in person?
+
+When I step through the parseCommand() code what is does is take what it calls a token and assigns it dce_transmit which in turn is assigned to args then it fails on the while loop condition and falls out of parseCommand() with args bein just args[0] = "dce_transmit".
+
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (iss >> std::noskipws >> token) {
+        if (token.front() == '"' && !inQuotes) {
+            inQuotes = true;
+            quotedString = token.substr(1); // Remove leading quote
+        } else if (token.back() == '"' && inQuotes) {
+            inQuotes = false;
+            quotedString += " " + token.substr(0, token.length() - 1); // Remove trailing quote
+            args.push_back(quotedString);
+        } else if (inQuotes) {
+            quotedString += " " + token;
+        } else {
+            args.push_back(token);
+        }
+    }
+    
+    return args;
+}
+
+this is the branch it executes to put "dce_transmit" in args[0].
+-             args.push_back(token);
+
+Then it fails this condition:
+-     while (iss >> std::noskipws >> token) {
+
+and args returns with just the command name:
+
+args = args[0] = "dce_transmit"
+
+
+///////////////////////
+This is interesting.  It's still not working.  Output of ./input is:
+
+args[0] = dce_transmit
+
+It picks up the dce_transmit part properly.
+
+The while loop condition fails next iteration and it's this:
+
+    while (iss >> std::noskipws >> token) {
+
+but in the debugger variable window it says this about iss:
+
+iss = Cannot instantiate printer for default visualizer
+
+I don't know how the while loop would evaluate the condition statement with iss displayed in the debugger so strangely.  Could maybe the parameter "input" be handled improperly somewhere in the area of treating input as a value or a pointer?
+
+////////////////////
+
+This is going really well.  Thanks for your help.  I'd like you to help me use parseCommand() in demo.  Where my command selection and ultimate calling of the function was being done is in Cmd.cpp:
+
+void Cmd::executeCommand(const std::string& name) const {
+    std::istringstream iss(name);
+    std::string commandName;
+    iss >> commandName;  // Extract the first word
+
+    auto it = commands.find(commandName);
+    if (it != commands.end()) {
+        std::vector<std::string> args;
+        std::string arg;
+        while (iss >> arg) {
+            args.push_back(arg);
+        }
+        it->second.execute(args);
+    } else {
+        std::cerr << "Command not found: " << commandName << std::endl;
+    }
+}
+
+This line:
+
+        it->second.execute(args);
+
+takes the args which is what parseCommand() returns, but I don't have a really good way of getting the parseCommand() output into the it->secong.execute(args); statement.  Should I make parseCommand a member method?  Or should is it more appropriate for it to be a helper function?
+
+Please advise on this?
+
+///////////////////////////
+
+

@@ -1,13 +1,7 @@
-#include "Cmd.hpp"
-#include <iostream>
 #include <sstream>
-
-void Cmd::addCommand(const std::string& name, Command::CommandFunction func) {
-    auto [it, inserted] = commands.try_emplace(name, name, std::move(func));
-    if (!inserted) {
-        std::cerr << "Command '" << name << "' already exists.\n";
-    }
-}
+#include <vector>
+#include <string>
+#include <iostream>
 
 std::vector<std::string> parseCommand(const std::string& input) {
     std::vector<std::string> args;
@@ -36,22 +30,11 @@ std::vector<std::string> parseCommand(const std::string& input) {
     return args;
 }
 
-void Cmd::executeCommand(const std::string& name) const {
-    std::vector<std::string> args = parseCommand(name);
+int main() {
+    std::string input = R"(dce_transmit 11:22:33:44:55:66 aa:bb:cc:dd:ee:ff "Hello World!!")";
+    std::vector<std::string> args = parseCommand(input);
     
-    if (args.empty()) {
-        std::cerr << "Error: Empty command string" << std::endl;
-        return;
-    }
-
-    std::string commandName = args[0];  // First argument is the command name
-
-    auto it = commands.find(commandName);
-    if (it != commands.end()) {
-        args.erase(args.begin());  // Remove command name from args before passing
-        it->second.execute(args);
-    } else {
-        std::cerr << "Command not found: " << commandName << std::endl;
+    for (size_t i = 0; i < args.size(); ++i) {
+        std::cout << "args[" << i << "] = " << args[i] << std::endl;
     }
 }
-

@@ -38,7 +38,7 @@ public:
             throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
         }
 
-        lnet = libnet_init(LIBNET_RAW4, tapName.c_str(), errbuf);
+        lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
         if (!lnet) {
             throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
         }
@@ -84,6 +84,8 @@ public:
     }
 
     void transmitFrame(const EthernetFrame& frame) {
+        libnet_clear_packet(lnet);  // Ensure a clean buffer before writing
+    
         libnet_ptag_t ethernetTag = libnet_build_ethernet(
             frame.getDstMac().data(), frame.getSrcMac().data(),
             ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),

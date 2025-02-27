@@ -11,7 +11,7 @@ public:
 
     Command(std::string name, CommandFunction func);
 
-    void execute() const;
+    void execute(const std::vector<std::string>& args) const;
 
     const std::string getName() const;
 

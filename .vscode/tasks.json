@@ -8,11 +8,13 @@
             "args": [
                 "-g",
                 "${workspaceFolder}/demo.cpp",
+                "${workspaceFolder}/Cmd.cpp",
+                "${workspaceFolder}/Command.cpp",
+                "${workspaceFolder}/EthernetFrame.cpp",
                 "-o",
                 "${workspaceFolder}/demo",
-                "-I${workspaceFolder}/include",
+                "-I${workspaceFolder}",
                 "-I/usr/include/jsoncpp",   // Corrected JSON include path
-                "-I/usr/include/conio.h",   // Corrected JSON include path
                 "-L/usr/lib",               // Add this if needed
                 "-lnet",
                 "-lpcap",
