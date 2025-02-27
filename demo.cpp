@@ -1,4 +1,6 @@
-#include "./DCE.hpp"
+#include "DCE.hpp"
+#include "Command.hpp"
+#include "Cmd.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <cstring>
@@ -9,10 +11,10 @@
 #include <unistd.h>
 #include <cstdlib>
 #include <memory>
-#include "./Observer.hpp"
+#include "Observer.hpp"
 #include <pcap.h>
 #include <libnet.h>
-#include <conio.h/conio.h>
+#include "EthernetFrame.hpp"
 
 // Function to create a TAP device
 std::string createTapDevice(const std::string& tapName) {
@@ -66,30 +68,36 @@ int main() {
         dce1->attach(observer1);
         dce2->attach(observer2);
 
-        std::vector<uint8_t> packet1 = observer1->getNextPacket();
-
-        std::cout << "DCE is running. Press Enter to exit..." << std::endl;
-
         // Start packet capture
         dce1->startCapture();
         dce2->startCapture();
 
-        bool running = true;
-        int i = 100;
-        while(--i)
-        {
-            sleep(1);
-            std::vector<uint8_t> packet1 = observer1->getNextPacket();
-
-            if (!packet1.empty()) {
-                std::cout << "Processing packet from TAP 1, size: " << packet1.size() << " bytes" << std::endl;
+        // Command execution setup
+        Cmd commandProcessor;
+        commandProcessor.addCommand("dce_transmit", [&dce1](const std::vector<std::string>& args) {
+            if (args.size() < 3) {
+                std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
+                return;
             }
+            
+            std::array<uint8_t, 6> srcMac;
+            std::array<uint8_t, 6> dstMac;
+            std::vector<uint8_t> payload(args[2].begin(), args[2].end());
+            
+            // Convert MAC addresses from string to byte array
+            sscanf(args[0].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &srcMac[0], &srcMac[1], &srcMac[2], &srcMac[3], &srcMac[4], &srcMac[5]);
+            sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
+            
+            EthernetFrame frame(srcMac, dstMac, payload);
+            dce1->transmitFrame(frame);
+            std::cout << "Transmitted data: " << args[2] << std::endl;
+        });
 
-            std::vector<uint8_t> packet2 = observer2->getNextPacket();
-            if (!packet2.empty()) {
-                std::cout << "Processing packet from TAP 2, size: " << packet2.size() << " bytes" << std::endl;
-            }
-
+        std::cout << "DCE is running. Enter command: " << std::endl;
+        std::string input;
+        while (std::getline(std::cin, input)) {
+            commandProcessor.executeCommand(input);
+            std::cout << "Enter command: " << std::endl;
         }
 
         // Stop packet capture

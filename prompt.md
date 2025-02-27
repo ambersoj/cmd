@@ -439,3 +439,335 @@ public:
 where in practice the rx buffer could be written with packet, or a part of packet, like packet.size() instead of just being printed out with std::cout, like in the code and the example above?  Would it be the proper use of to write the packets to their respective rx buffers, instead of just printing out a message?
 
 And I was wondering if in that code there are two taps and they each have an observer and they could both be connected to individual rx buffers.
+
+/////////////////////
+
+# Chat GPT Partner Feedback and Way Forward #
+
+Good morning, partner.  Here's somefeedback for you.  You have done a very very good job for me and I'm grateful.  Your code, with the odd tweak here and there by me, has resulted in a really nice DCE RX channel for cmd.  I managed to scrounge up some kbhit() code, because the conio.h one was being difficult.  I currently have this in main() of our demo.cpp:
+
+bool kbhit()
+{
+    termios term;
+    tcgetattr(0, &term);
+
+    termios term2 = term;
+    term2.c_lflag &= ~ICANON;
+    tcsetattr(0, TCSANOW, &term2);
+
+    int byteswaiting;
+    ioctl(0, FIONREAD, &byteswaiting);
+
+    tcsetattr(0, TCSANOW, &term);
+
+    return byteswaiting > 0;
+}
+
+int main() {
+    try {
+        std::string tap1 = createTapDevice("tap0");
+        std::string tap2 = createTapDevice("tap1");
+
+        // Initialize libnet
+        char errbuf[LIBNET_ERRBUF_SIZE];
+        libnet_t *lnet1 = libnet_init(LIBNET_RAW4, tap1.c_str(), errbuf);
+        libnet_t *lnet2 = libnet_init(LIBNET_RAW4, tap2.c_str(), errbuf);
+        if (!lnet1 || !lnet2) {
+            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+        }
+
+        // Create DCE instances for each TAP device
+        auto dce1 = std::make_shared<DCE>(tap1);
+        auto dce2 = std::make_shared<DCE>(tap2);
+
+        // Create Observers for each DCE instance
+        auto observer1 = std::make_shared<RxObserver>();
+        auto observer2 = std::make_shared<RxObserver>();
+
+        // Attach Observers
+        dce1->attach(observer1);
+        dce2->attach(observer2);
+
+        std::vector<uint8_t> packet1 = observer1->getNextPacket();
+
+        std::cout << "DCE is running. Press Enter to exit..." << std::endl;
+
+        // Start packet capture
+        dce1->startCapture();
+        dce2->startCapture();
+
+        bool running = true;
+        int i = 100;
+        while(!kbhit())
+        {
+            sleep(.1);
+            std::vector<uint8_t> packet1 = observer1->getNextPacket();
+
+            if (!packet1.empty()) {
+                std::cout << "Processing packet from TAP 1, size: " << packet1.size() << " bytes" << std::endl;
+            }
+
+            std::vector<uint8_t> packet2 = observer2->getNextPacket();
+            if (!packet2.empty()) {
+                std::cout << "Processing packet from TAP 2, size: " << packet2.size() << " bytes" << std::endl;
+            }
+
+        }
+
+        // Stop packet capture
+        dce1->stopCapture();
+        dce2->stopCapture();
+
+        // Cleanup libnet
+        libnet_destroy(lnet1);
+        libnet_destroy(lnet2);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+The kbhit() and while(!kbhit()) stuff is just temporary.  For now if gives demo.cpp a nice way to quit out while monitoring for observer action... I'll say it works well.  Here's some random screen output to give you an idea of its performance:
+
+root@PRED:/usr/local/cmd# ./demo
+Created TAP device: tap0
+Created TAP device: tap1
+DCE is running. Press Enter to exit...
+RxObserver received packet of size: 86 bytes
+RxObserver received packet of size: 90 bytes
+Processing packet from TAP 1, size: 86 bytes
+RxObserver received packet of size: 90 bytes
+Processing packet from TAP 2, size: 90 bytes
+Processing packet from TAP 1, size: 90 bytes
+RxObserver received packet of size: 90 bytes
+root@PRED:/usr/local/cmd#
+
+I have a question now.  DCEs aren't just silent rx devices, they have an upstream capability, even though formally its focus should be to facilitate the DTEs transfer.  For my application of taps as DCEs I'm not presently using the up stream capability of the tap DCEs.  We should have a command tx <dce-src-mac> <dte-dst-mac> <payload> to be a proper DCE.  But this brings up the question of demo.cpp/cmd project integration because when we talk about adding commands we're talking about using the Command pattern code that's already present in cmd (I've sent you that code, you might still have it and are able to look at it, otherwise if you ask I'll happily send it to you).
+
+I want to run this idea past you that what we take on next is creating a command in demo.cpp kind of along the lines of the main() in cmd:
+
+void testCommandFunction() {
+    std::cout << "Test command executed successfully!" << std::endl;
+}
+
+int main() {
+    Cmd myCmd;
+    myCmd.addCommand("Test command", testCommandFunction);
+
+    std::cout << "Executing stored command..." << std::endl;
+    myCmd.executeCommand("Test command");
+
+    return 0;
+}
+
+See above where a command is created and then executed just as a test in my production/dev environment.  Could you take the existing cmd code of Cmd, Command and EthernetFrame, along with your demo.cpp code and put them together with a new main() to create an integrated single program with both the command handling capability of cmd and also the rx dce capabilities of demo.cpp?  Maybe it would look something like this:
+
+// demo.cpp
+
+#include <Cmd.hpp>
+#include <Command.hpp>
+
+int main()
+{
+
+    // This pseudo-code makes the commands
+    Cmd myCmd;
+    myCmd.addCommand("tx_dce", tx_dceFunction);
+    myCmd.addCommand("rx_dce", rx_dceFunction);
+
+    // This pseudo-code makes the taps and initializes the taps and operates 
+    // the taps with libnet and pcap
+try {
+        std::string tap1 = createTapDevice("tap0");
+        std::string tap2 = createTapDevice("tap1");
+
+        // Initialize libnet
+        char errbuf[LIBNET_ERRBUF_SIZE];
+        libnet_t *lnet1 = libnet_init(LIBNET_RAW4, tap1.c_str(), errbuf);
+        libnet_t *lnet2 = libnet_init(LIBNET_RAW4, tap2.c_str(), errbuf);
+        if (!lnet1 || !lnet2) {
+            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+        }
+
+        // Create DCE instances for each TAP device
+        auto dce1 = std::make_shared<DCE>(tap1);
+        auto dce2 = std::make_shared<DCE>(tap2);
+
+        // Create Observers for each DCE instance
+        auto observer1 = std::make_shared<RxObserver>();
+        auto observer2 = std::make_shared<RxObserver>();
+
+        // Attach Observers
+        dce1->attach(observer1);
+        dce2->attach(observer2);
+
+        std::vector<uint8_t> packet1 = observer1->getNextPacket();
+
+        // Start packet capture
+        dce1->startCapture();
+        dce2->startCapture();
+
+        // This pseudo-code transmits on the DCEs and also explicitly receives on a DCE.
+        // Remember if the rx buffer is empty there are no consequences, just an empty payload.
+        myCmd.executeCommand("tx_dce_tap1");
+        myCmd.executeCommand("tx_dce_tap2");
+        myCmd.executeCommand("rx_dce_tap1");
+        myCmd.executeCommand("rx_dce_tap2");
+
+        // Stop packet capture
+        dce1->stopCapture();
+        dce2->stopCapture();
+
+        // Cleanup libnet
+        libnet_destroy(lnet1);
+        libnet_destroy(lnet2);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+Don't code anything yet... let's get our plan of action highly detailed and get your questions answered first and anwwering your question always makes my understanding of what I'm trying to accomplish clearer too.
+
+So let's start off with you commenting and criticizing what's above, with respect to the integration of demo.cpp and cmd and the cmd classes of Cmd, Command and EthernetFrame.
+
+//////////////////////
+
+There are just a couple things to fix that I've spotted right away and VSCode flags as erroneous:
+
+            EthernetFrame frame(data);
+            dce1->transmitFrame(frame);
+
+The constructor for a frame is like this:
+
+EthernetFrame::EthernetFrame(const std::array<uint8_t, 6>& srcMac, 
+                             const std::array<uint8_t, 6>& dstMac, 
+                             const std::vector<uint8_t>& payload) 
+    : srcMac(srcMac), dstMac(dstMac), payload(payload) {}
+
+so the EthernetFrame frame(data) line doesn't work.
+
+And not only is EthernetFrame frame wrong but there is no DCE::transmitFrame() method.  Can you please properly create the EthernetFrame and add a DCE::transmitFrame() method?
+
+
+////////////////////
+
+Please advise on how to use the command dce_transmit on the demo.cpp command line.
+
+Also, could you send me the updated DCE.h with the transmitFrame() method in it please?
+
+///////////////////////
+
+There's an issue with the lamda function.  Here are some VSCode messages:
+
+[{
+	"resource": "/usr/local/cmd/demo.cpp",
+	"owner": "cpptools",
+	"severity": 8,
+	"message": "cannot convert ‘main()::<lambda(const std::vector<std::__cxx11::basic_string<char> >&)>’ to ‘Command::CommandFunction’ {aka ‘std::function<void()>’}",
+	"source": "gcc",
+	"startLineNumber": 77,
+	"startColumn": 53,
+	"endLineNumber": 77,
+	"endColumn": 53
+},{
+	"resource": "/usr/local/cmd/demo.cpp",
+	"owner": "C/C++: IntelliSense",
+	"code": "312",
+	"severity": 8,
+	"message": "no suitable user-defined conversion from \"lambda [](const std::vector<std::string, std::allocator<std::string>> &args)->void\" to \"Command::CommandFunction\" (aka \"std::function<void ()>\") exists",
+	"source": "C/C++",
+	"startLineNumber": 77,
+	"startColumn": 53,
+	"endLineNumber": 77,
+	"endColumn": 54
+}]
+
+Line 77 is this line:
+
+        commandProcessor.addCommand("dce_transmit", [&dce1](const std::vector<std::string>& args) {
+
+I've used this command line:
+
+g++ -std=c++17 -o demo demo.cpp Cmd.cpp Command.cpp EthernetFrame.cpp -Iusr/include/jsoncpp/json -lnet -lpcap -ljsoncpp
+
+and tried g++ versions 17 and 20.
+
+This is the compiler screen output:
+
+root@PRED:/usr/local/cmd# g++ -std=c++17 -o demo demo.cpp Cmd.cpp Command.cpp EthernetFrame.cpp -Iusr/include/jsoncpp/json -lnet -lpcap -ljsoncpp
+demo.cpp: In function ‘int main()’:
+demo.cpp:77:53: error: cannot convert ‘main()::<lambda(const std::vector<std::__cxx11::basic_string<char> >&)>’ to ‘Command::CommandFunction’ {aka ‘std::function<void()>’}
+   77 |         commandProcessor.addCommand("dce_transmit", [&dce1](const std::vector<std::string>& args) {
+      |                                                     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                                                     |
+      |                                                     main()::<lambda(const std::vector<std::__cxx11::basic_string<char> >&)>
+   78 |             if (args.size() < 3) {
+      |             ~~~~~~~~~~~~~~~~~~~~~~                   
+   79 |                 std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
+      |                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   80 |                 return;
+      |                 ~~~~~~~                              
+   81 |             }
+      |             ~                                        
+   82 | 
+      |                                                      
+   83 |             std::array<uint8_t, 6> srcMac;
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~           
+   84 |             std::array<uint8_t, 6> dstMac;
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~           
+   85 |             std::vector<uint8_t> payload(args[2].begin(), args[2].end());
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   86 | 
+      |                                                      
+   87 |             // Convert MAC addresses from string to byte array
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   88 |             sscanf(args[0].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &srcMac[0], &srcMac[1], &srcMac[2], &srcMac[3], &srcMac[4], &srcMac[5]);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   89 |             sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   90 | 
+      |                                                      
+   91 |             EthernetFrame frame(srcMac, dstMac, payload);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   92 |             dce1->transmitFrame(frame);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~              
+   93 |             std::cout << "Transmitted data: " << args[2] << std::endl;
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   94 |         });
+      |         ~                                            
+In file included from demo.cpp:3:
+Cmd.hpp:10:71: note:   initializing argument 2 of ‘void Cmd::addCommand(const std::string&, Command::CommandFunction)’
+   10 |     void addCommand(const std::string& name, Command::CommandFunction func);
+      |                                              ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~
+root@PRED:/usr/local/cmd# 
+
+///////////
+
+Something is still wrong and I might have an idea what.  See this:
+
+void Command::execute() const {
+        func();
+}
+
+and notice that func() doesn't have any arguments.  Will we need and overloaded func() method?  For testing purposed and simplicity I'd like something quick for now that'll make the new dce_transmit command work.  For now I don't want you to provide a comprehensive solution that'll work in the generic case, just something quick and easy to prove the concept of dce transmission.
+
+Here's the compiler output:
+
+root@PRED:/usr/local/cmd# g++ -std=c++17 -o demo demo.cpp Cmd.cpp Command.cpp EthernetFrame.cpp -Iusr/include/jsoncpp/json -lnet -lpcap -ljsoncpp
+Command.cpp: In member function ‘void Command::execute() const’:
+Command.cpp:13:13: error: no match for call to ‘(const Command::CommandFunction {aka const std::function<void(const std::vector<std::__cxx11::basic_string<char> >&)>}) ()’
+   13 |         func();
+      |         ~~~~^~
+In file included from /usr/include/c++/13/functional:59,
+                 from Command.hpp:6,
+                 from Command.cpp:1:
+/usr/include/c++/13/bits/std_function.h:587:7: note: candidate: ‘_Res std::function<_Res(_ArgTypes ...)>::operator()(_ArgTypes ...) const [with _Res = void; _ArgTypes = {const std::vector<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >&}]’
+  587 |       operator()(_ArgTypes... __args) const
+      |       ^~~~~~~~
+/usr/include/c++/13/bits/std_function.h:587:7: note:   candidate expects 1 argument, 0 provided
+root@PRED:/usr/local/cmd# 

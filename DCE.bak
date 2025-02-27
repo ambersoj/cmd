@@ -11,7 +11,6 @@
 #include <memory>
 #include <thread>
 #include <atomic>
-#include "EthernetFrame.hpp"
 
 class DCE : public ISubject {
 private:
@@ -23,7 +22,6 @@ private:
     char errbuf[PCAP_ERRBUF_SIZE];
     std::vector<std::shared_ptr<IObserver>> observers;
     bool capturing;
-    libnet_t* lnet;
 
     static void packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
         auto dce = reinterpret_cast<DCE*>(userData);
@@ -37,20 +35,12 @@ public:
         if (!pcapHandle) {
             throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
         }
-
-        lnet = libnet_init(LIBNET_RAW4, tapName.c_str(), errbuf);
-        if (!lnet) {
-            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
-        }
     }
 
     ~DCE() {
         stopCapture();
         if (pcapHandle) {
             pcap_close(pcapHandle);
-        }
-        if (lnet) {
-            libnet_destroy(lnet);
         }
     }
 
@@ -71,7 +61,7 @@ public:
     void startCapture() {
         running = true;
         captureThread = std::thread([this]() {
-            pcap_loop(pcapHandle, 0, packetHandler, reinterpret_cast<u_char*>(this));
+        pcap_loop(pcapHandle, 0, packetHandler, reinterpret_cast<u_char*>(this));
         });
     }
 
@@ -80,23 +70,6 @@ public:
         pcap_breakloop(pcapHandle);
         if (captureThread.joinable()) {
             captureThread.join();
-        }
-    }
-
-    void transmitFrame(const EthernetFrame& frame) {
-        libnet_ptag_t ethernetTag = libnet_build_ethernet(
-            frame.getDstMac().data(), frame.getSrcMac().data(),
-            ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
-            lnet, 0
-        );
-
-        if (ethernetTag == -1) {
-            throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
-        }
-
-        int bytesWritten = libnet_write(lnet);
-        if (bytesWritten == -1) {
-            throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
         }
     }
 };
