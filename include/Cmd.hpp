@@ -14,6 +14,8 @@ public:
     explicit Cmd(std::vector<std::shared_ptr<COM>>& dces);
     void addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func);
     void run();
+    void executeCommand(const std::string& input);
+
 
 private:
     std::unordered_map<std::string, Command> commands;
