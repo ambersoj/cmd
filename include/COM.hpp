@@ -1,5 +1,5 @@
-#ifndef DCE_HPP
-#define DCE_HPP
+#ifndef COM_HPP
+#define COM_HPP
 
 #include "ISubject.hpp"
 #include "EthernetFrame.hpp"
@@ -11,9 +11,9 @@
 #include <memory>
 #include <stdexcept>
 
-class DCE {
+class COM {
 public:
-    DCE(const std::string& tapName, const std::string& macAddress);
+    COM(const std::string& tapName, const std::string& macAddress);
     bool initializeTAP();
     bool initializeLibnet();
     bool initializePcap();
@@ -25,4 +25,4 @@ private:
     std::string macAddress;
 };
 
-#endif // DCE_HPP
+#endif // COM_HPP

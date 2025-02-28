@@ -1,7 +1,7 @@
 #include "Cmd.hpp"
 #include <iostream>
 
-Cmd::Cmd(std::vector<std::shared_ptr<DCE>>& dces) : dceList(dces) {}
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : dceList(coms) {}
 
 void Cmd::addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func) {
     commands.emplace(name, Command(name, func));

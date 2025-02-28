@@ -2,7 +2,7 @@
 #define CMD_HPP
 
 #include "Command.hpp"
-#include "DCE.hpp"
+#include "COM.hpp"
 #include <unordered_map>
 #include <vector>
 #include <memory>
@@ -11,13 +11,13 @@
 
 class Cmd {
 public:
-    explicit Cmd(std::vector<std::shared_ptr<DCE>>& dces);
+    explicit Cmd(std::vector<std::shared_ptr<COM>>& dces);
     void addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func);
     void run();
 
 private:
     std::unordered_map<std::string, Command> commands;
-    std::vector<std::shared_ptr<DCE>> dceList;
+    std::vector<std::shared_ptr<COM>> dceList;
 };
 
 #endif // CMD_HPP

@@ -1,4 +1,4 @@
-#include "DCE.hpp"
+#include "COM.hpp"
 #include "Cmd.hpp"
 #include <iostream>
 #include <memory>
@@ -7,12 +7,12 @@
 int main() {
     try {
         // Initialize DCE instances
-        std::vector<std::shared_ptr<DCE>> dces;
-        dces.push_back(std::make_shared<DCE>("tap0", "AA:BB:CC:DD:EE:01"));
-        dces.push_back(std::make_shared<DCE>("tap1", "AA:BB:CC:DD:EE:02"));
+        std::vector<std::shared_ptr<COM>> coms;
+        coms.push_back(std::make_shared<COM>("tap0", "AA:BB:CC:DD:EE:01"));
+        coms.push_back(std::make_shared<COM>("tap1", "AA:BB:CC:DD:EE:02"));
 
         // Initialize command interface
-        Cmd cmd(dces);
+        Cmd cmd(coms);
         
         // Run the command loop
         cmd.run();
