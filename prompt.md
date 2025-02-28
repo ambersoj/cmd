@@ -1114,3 +1114,893 @@ std::vector<uint8_t> RxObserver::getNextPacket() {
     }
     return {};  // Return an empty packet if buffer is empty
 }
+
+///////////////////
+
+I'm happy to say that I have all the code integrated together so that the cmd, the core component that all of the mpp components will base off of, can accept the command dce_transmit and receive packets that are written to rx buffers.  It now looks like this:
+
+cmd
+├── bin
+│   └── cmd
+├── CMakeLists.txt
+├── cmd
+├── cmd.code-workspace
+├── docs
+│   └── mpp.md
+├── include
+│   ├── Cmd.hpp
+│   ├── Command.hpp
+│   ├── DCE.hpp
+│   ├── EthernetFrame.hpp
+│   ├── IObserver.hpp
+│   ├── ISubject.hpp
+│   └── RxObserver.hpp
+├── prompt.md
+├── src
+│   ├── CMakeLists.txt
+│   ├── cmd
+│   ├── Cmd.cpp
+│   ├── Command.cpp
+│   ├── DCE.cpp
+│   ├── EthernetFrame.cpp
+│   ├── main.cpp
+│   └── RxObserver.cpp
+└── tests
+    └── CMakeLists.txt
+
+It's output is as follows:
+
+root@PRED:/usr/local/cmd# ./cmd
+Created TAP device: tap0
+Created TAP device: tap1
+DCE is running.
+Enter command: 
+dce_transmit 11:22:33:44:55:66 aa:bb:cc:dd:ee:ff "Hello World!!!"
+Transmitted data: Hello World!!!
+Enter command: 
+exit
+root@PRED:/usr/local/cmd# 
+
+The traffic is confirmed with wireshark.
+
+The RxObserver::getNextPacket() does a good job of filling RxBuffer.
+
+So where we're at with cmd is a very nice little system.  I wonder if you recall the beginning of our session and the discussion of how the cmd components will behave and things like broadcasting the commands that are entered in json unless the command is >quiet in which case the command broadcasting behavior is suppressed.  Recall that the cmd with almost the exact functionality as it has now will the generic base component form which all components will start and then all the components will grow to specialize in something.  There are 24 taps in the complete system according to this table:
+
+## TAP-to-MAC Mapping
+
+| Component | TX TAP Name (DTE) | Destination (DCE) | TX MAC Address | RX TAP Name (DCE) | Source (DTE) | RX MAC Address |
+|-----------|------------------|-------------------|----------------|------------------|--------------|----------------|
+| HUD       | hud_tx_cmd       | CMD               | 02:00:00:00:01 | hud_rx_cmd       | CMD          | 02:00:00:00:02 |
+| HUD       | hud_tx_net       | NET               | 02:00:00:00:03 | hud_rx_net       | NET          | 02:00:00:00:04 |
+| HUD       | hud_tx_cnl       | CNL               | 02:00:00:00:07 | hud_rx_cnl       | CNL          | 02:00:00:00:08 |
+| CMD       | cmd_tx_hud       | HUD               | 02:00:00:00:02 | cmd_rx_hud       | HUD          | 02:00:00:00:01 |
+| CMD       | cmd_tx_net       | NET               | 02:00:00:00:05 | cmd_rx_net       | NET          | 02:00:00:00:06 |
+| CMD       | cmd_tx_cnl       | CNL               | 02:00:00:00:09 | cmd_rx_cnl       | CNL          | 02:00:00:00:10 |
+| NET       | net_tx_hud       | HUD               | 02:00:00:00:04 | net_rx_hud       | HUD          | 02:00:00:00:03 |
+| NET       | net_tx_cmd       | CMD               | 02:00:00:00:06 | net_rx_cmd       | CMD          | 02:00:00:00:05 |
+| NET       | net_tx_cnl       | CNL               | 02:00:00:00:11 | net_rx_cnl       | CNL          | 02:00:00:00:12 |
+| CNL       | cnl_tx_hud       | HUD               | 02:00:00:00:08 | cnl_rx_hud       | HUD          | 02:00:00:00:07 |
+| CNL       | cnl_tx_cmd       | CMD               | 02:00:00:00:10 | cnl_rx_cmd       | CMD          | 02:00:00:00:09 |
+| CNL       | cnl_tx_net       | NET               | 02:00:00:00:12 | cnl_rx_net       | NET          | 02:00:00:00:11 |
+
+
+Cmd has two DCE channels so with just one more DCE channel it will be complete as far as DCE rx and tx goes, I think.  Pretty close to finished, if it's not.
+
+Now Cmd needs three DTE channels.  All of the DCE and DTE channels need to be named as shown in the above table.  For now instead of rigging up a way to dynamically assignin mac addresses let's just put them in #DEFINE lines for now.
+
+I don't want you to generate any code now, partner, but I'd like to hear what your thoughts are and hear your comments and take your questions.  We're doing great and I'm graeful for you help and value you a great deal, partner!  Let's keep up the high achievement!
+
+///////////////////
+
+Oh I'm so glad I chat with you in these little post-implementation and post-integration lulls because I've decided to ditch the whole boot-stap thing and just make the cmd 6 channels all equivalent and bidirectional with only the designations in their names distinguishing their intended purpose.  The cmd will have some commands in place out of the box to operate each of the channels and because each DCE currently has bidirectional capability the differnece between a DCE and a DTE is in name alone, isn't it?  And if that's so then the DCE should be named differently because now all of the ports will be the same and the distinction between DTE and DCE will be implied by the tap names as layed out in the tap-to-mac table above.  We'll a command to transmit a frame from any of the 6 COM (the DCE will become the COM) blocks to any of the other ports and we'll have a command to do a message retreive process of any of the COM blocks.  It'll be total freedom and modular and bidirectional and it'll all be tamed by something of an OS providing services so the code we've done pretty much is a BIOS with this model.
+
+So correct me if I'm wrong but we're pretty much just adding 4 COM blocks away from pretty much having a cmd block that'll make for a perfectly good generic component starting point for mpp.
+
+
+I'd like to hear your thoughts and answer your questions and read you comments!
+
+///////////////////////////
+
+Judging from you response you see this cmd pretty much like I do now... 6 COMS blocks with a couple commands out of the box to do a basic <srcMac> to <dstMac> transmission of a completely arbitrary manner and a basic read of a <dstMac> RxBuffer and retrieve a single message (or empty if no messages) of a completely arbitrary manner.  And then a command to quit and that's it I think, right?
+
+I'd like to express my willingness to keep the DCE called DCE for now.  I think that we should be happy with getting the six channels altogether and even though to you and I they are COM blocks we'll just keep calling them DCEs because I'm afraid of messing up in VSCode and having an avoidable delay right in on the home stretch here and I'm not willing to jeopardize the possibility of having a cmd before I go to bed tonight.  Do you feel ok with still calling the COM DCE for a while yet?
+
+If you'd like to take a crack at wiring together all of those classes that we made in 6 symmetrical channels and feel confident you can follow the tap-to-mac table then I'd like you to try it.  But I'm only saying this because I've been so impressed by your great capability - I'd have to thing about it and plan some more if I were to do it myself but I thought maybe it would all be very clear exactly what to do already, in which case feel free to.  But if you have more questions or concerns I'll enjoy very much taking them and discussing them.  I enjoy our talks a great deal, partner!
+
+////////////////////////
+
+Tell me if my understanding of what to do with the Cmd.hpp file called Cmd Dce Channels is correct, ok?
+
+If I take the methods in that file you sent and put the signatures in the Cmd.hpp part of the Cmd class and the implementation parts of the methods in the .cpp part of the Cmd class, then I can make a main() that creates a Cmd and kicks it off like this:
+
+#include "Cmd.hpp"
+
+int main()
+{
+    Cmd cmd;
+    cmd.run();
+    exit(0);
+}
+
+Is that true?
+
+I like the naming just tap0 to 5 and once again the new OS I'm going to make for this system will abstract them into dte and dce.
+
+//////////////
+
+Is this code going to give the trouble that we created the helper function parseCommand() to handle?
+
+void Cmd::run() {
+    std::string command;
+    while (true) {
+        std::cout << "cmd> ";
+        std::getline(std::cin, command);
+        
+        if (command == "exit") break;
+        
+        auto tokens = tokenize(command);
+        if (tokens.size() >= 3 && tokens[0] == "send") {
+            send(tokens[1], tokens[2], tokens[3]);
+        } else if (tokens.size() == 2 && tokens[0] == "recv") {
+            std::cout << recv(tokens[1]) << "\n";
+        } else {
+            std::cout << "Unknown command.\n";
+        }
+    }
+}
+
+std::vector<std::string> Cmd::tokenize(const std::string& str) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(str);
+    std::string token;
+    while (iss >> token) tokens.push_back(token);
+    return tokens;
+}
+
+This is the parseCommand() that we made:
+
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (std::getline(iss, token, ' ')) {  // Read tokens by space
+        if (!token.empty()) {
+            if (token.front() == '"' && !inQuotes) {
+                inQuotes = true;
+                quotedString = token.substr(1);  // Remove leading quote
+            } else if (token.back() == '"' && inQuotes) {
+                inQuotes = false;
+                quotedString += " " + token.substr(0, token.length() - 1);  // Remove trailing quote
+                args.push_back(quotedString);
+            } else if (inQuotes) {
+                quotedString += " " + token;
+            } else {
+                args.push_back(token);
+            }
+        }
+    }
+
+    return args;
+}
+
+Are these two portions of code, one from the existing Cmd.cpp code  and the other one that's recent that both deal with tokens are independent or are they trying to do the same job?  Is parseCommand() superfluous with the new run() and tokenize?  Also in send()is sendFrame() supposed to be the current method transmitFrame()?
+
+In the main program should there be lines that create the commands send and recv that will then have Command class objects and their function pointers will have to be passed in at that time?
+
+////////////////////////
+
+I thought commands used the command pattern and were created this way:
+
+        commandProcessor.addCommand("dce_transmit", [&dce0](const std::vector<std::string>& args) {
+            if (args.size() < 3) {
+                std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
+                return;
+            }
+            
+            std::array<uint8_t, 6> srcMac;
+            std::array<uint8_t, 6> dstMac;
+            std::vector<uint8_t> payload(args[2].begin(), args[2].end());
+            
+            // Convert MAC addresses from string to byte array
+            sscanf(args[0].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &srcMac[0], &srcMac[1], &srcMac[2], &srcMac[3], &srcMac[4], &srcMac[5]);
+            sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
+            
+            EthernetFrame frame(srcMac, dstMac, payload);
+            dce0->transmitFrame(frame);
+            std::cout << "Transmitted data: " << args[2] << std::endl;
+        });
+
+
+I'm confused now. I was pretty happy with having a Command pattern made in large part for it's addCommand() character and it's commands collection with the Command object referenced there.  If these send and recv commands aren't like that then I think we should reconsider implementing them.  I'm not opposed to it but I'd at the same time like to have every single command have commonallity and I'd like send and recv prepackaged, but really absolutely no different than any other command.  It's important now because of the future intent of the mpp and in particular the cmd.  There's be user-defined commands, a DSL and some Lua scripting handled by the cmd in the future and the character and ethos of mpp is inline with each and every command has to go through the Command pattern part of the mpp/cmd code.
+
+/////////////////////////
+
+Why don't we just add them like this for now:
+
+        commandProcessor.addCommand("dce_transmit", [&dce0](const std::vector<std::string>& args) {
+            if (args.size() < 3) {
+                std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
+                return;
+            }
+            
+            std::array<uint8_t, 6> srcMac;
+            std::array<uint8_t, 6> dstMac;
+            std::vector<uint8_t> payload(args[2].begin(), args[2].end());
+            
+            // Convert MAC addresses from string to byte array
+            sscanf(args[0].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &srcMac[0], &srcMac[1], &srcMac[2], &srcMac[3], &srcMac[4], &srcMac[5]);
+            sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
+            
+            EthernetFrame frame(srcMac, dstMac, payload);
+            dce0->transmitFrame(frame);
+            std::cout << "Transmitted data: " << args[2] << std::endl;
+        });
+
+I'm happy with that way.  For now it's great.  It's crude but still pretty tamed down considering what a nightmare some systems can be.  Later on it can get cleaned up but for now let's just through the commands in like we did with dce_transmit.  The way I see it, if I'm not mistaken, a programmer just has to deal with a little bit of a funny arrangement of code and a rare looking function call like this:
+
+commandProcessor.addCommand("dce_transmit", [&dce0](const std::vector<std::string>& args) {
+
+But it made a collection of commands with names and a func pointer and good enough for now and maybe forever.
+
+In the Cmd constructor could we keep the old addCommand() method and invoke it from there to create our send and recv commands with there funcion pointers?  I thougt that a function pointer was just the functions name and if that's the case then we wouldn't have to put the command execution logic in that "in-line" manner as shown above anyway, would we?  I'd like to make it neat, but still use the Command pattern and Command class here in Cmd and the commands collection.
+
+So we need parseCommand() back.  Ok I'll keep parseCommand().  I'm eager to hear what you think about keeping addCommand() too.
+
+//////////
+
+Does the command send then execute the same logic further down the one eventually that out dce_transmit command did, in particular the transmitFrame() method?  I got a bit lost trying to follow through with the difference between send and transmit and certain similarities between things that I'm used to yet and I a bit mixed up.  But I hope you've got things straighter than me but regardless we have to get in-line and on the same page before I drop this new code in.
+
+If I were to put this new Cmd code in then could I issue:
+
+send <srcMac> <dstMac> <payload>
+
+and it would invoke transmitFrame()?
+
+///////////////
+
+But there is no sendFrame().  Not in EthernetFrame class nor anywhere else.  Can we just plain and simply make sendFrame() transmitFrame() and it'll work like it should, won't it?
+
+Couldn't I just leave every thing except for the Cmd constructor the same as it is right now with main() looking like this:
+
+nt main() {
+    try {
+        std::string tap0 = createTapDevice("tap0");
+        std::string tap1 = createTapDevice("tap1");
+
+        // Initialize libnet
+        char errbuf[LIBNET_ERRBUF_SIZE];
+        libnet_t *lnet0 = libnet_init(LIBNET_LINK, tap0.c_str(), errbuf);
+        libnet_t *lnet1 = libnet_init(LIBNET_LINK, tap1.c_str(), errbuf);
+        if (!lnet0 || !lnet1) {
+            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+        }
+
+        // Create DCE instances for each TAP device
+        auto dce0 = std::make_shared<DCE>(tap0);
+        auto dce1 = std::make_shared<DCE>(tap1);
+
+        // Create Observers for each DCE instance
+        auto observer0 = std::make_shared<RxObserver>();
+        auto observer1 = std::make_shared<RxObserver>();
+
+        // Attach Observers
+        dce0->attach(observer0);
+        dce1->attach(observer1);
+
+        // Start packet capture
+        dce0->startCapture();
+        dce1->startCapture();
+
+        // Command execution setup
+        Cmd commandProcessor;
+        commandProcessor.addCommand("dce_transmit", [&dce0](const std::vector<std::string>& args) {
+            if (args.size() < 3) {
+                std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
+                return;
+            }
+            
+            std::array<uint8_t, 6> srcMac;
+            std::array<uint8_t, 6> dstMac;
+            std::vector<uint8_t> payload(args[2].begin(), args[2].end());
+            
+            // Convert MAC addresses from string to byte array
+            sscanf(args[0].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &srcMac[0], &srcMac[1], &srcMac[2], &srcMac[3], &srcMac[4], &srcMac[5]);
+            sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
+            
+            EthernetFrame frame(srcMac, dstMac, payload);
+            dce0->transmitFrame(frame);
+            std::cout << "Transmitted data: " << args[2] << std::endl;
+        });
+
+        std::cout << "DCE is running.\nEnter command: " << std::endl;
+        std::string input;
+        while (std::getline(std::cin, input)) {
+            if(input == "exit")
+            {
+                break;
+            }
+            commandProcessor.executeCommand(input);
+            std::cout << "Enter command: " << std::endl;
+        }
+
+        // Stop packet capture
+        dce0->stopCapture();
+        dce1->stopCapture();
+
+        // Cleanup libnet
+        libnet_destroy(lnet0);
+        libnet_destroy(lnet1);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+
+
+///////////////////////////////
+
+
+
+We've got this carnation of some DCE code that we could draw from too:
+
+#include "Cmd.hpp"
+#include "EthernetHandler.hpp"
+#include <iostream>
+#include <unordered_map>
+
+Cmd::Cmd() {
+    // Initialize 6 DCE (COM) blocks
+    for (int i = 0; i < 6; ++i) {
+        std::string tapName = "tap" + std::to_string(i);
+        dceBlocks[tapName] = std::make_unique<EthernetHandler>(tapName);
+    }
+
+    // Register commands
+    addCommand("send", [this](const std::vector<std::string>& args) {
+        if (args.size() < 3) {
+            std::cerr << "Error: Usage - send <srcMac> <dstMac> <data>\n";
+            return;
+        }
+        send(args[0], args[1], args[2]);
+    });
+
+    addCommand("recv", [this](const std::vector<std::string>& args) {
+        if (args.size() < 1) {
+            std::cerr << "Error: Usage - recv <dstMac>\n";
+            return;
+        }
+        std::cout << recv(args[0]) << "\n";
+    });
+}
+
+void Cmd::addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func) {
+    commands[name] = func;
+}
+
+void Cmd::parseCommand(const std::string& input) {
+    auto tokens = tokenize(input);
+    if (tokens.empty()) return;
+
+    auto cmdIt = commands.find(tokens[0]);
+    if (cmdIt != commands.end()) {
+        cmdIt->second(std::vector<std::string>(tokens.begin() + 1, tokens.end()));
+    } else {
+        std::cerr << "Unknown command: " << tokens[0] << "\n";
+    }
+}
+
+void Cmd::run() {
+    std::string command;
+    while (true) {
+        std::cout << "cmd> ";
+        std::getline(std::cin, command);
+        
+        if (command == "exit") break;
+        parseCommand(command);
+    }
+}
+
+std::vector<std::string> Cmd::tokenize(const std::string& str) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(str);
+    std::string token;
+    while (iss >> token) tokens.push_back(token);
+    return tokens;
+}
+
+and it looks like it would tie into my existing cmd because it creates the 6 taps (so that could come out of main) and forces the send and recv commands to go throught the Command pattern process and get stuffed into the commands map like any other command.  It uses that parse command and I could keep the existing one or switch over to this one with all the "token" lingo, depending on which is overall better.
+
+So maybe we could have a main() that does quite a bit of the instantiation and initialization and kicking off processes work and Cmd does a bit but as messy as it might look it's proven, and not disgustingly messy, is it?  Let's find a way using more of what we already have like addCommand(), parseCommand() and a Cmd constructor for some of the work too.
+
+Like I said, I get a little mixed up.  Keep that in mind and be a bit forgiving in precision to understand it best.
+
+//////////////////////////
+
+What do you think of this?  Perhaps I'll do main somnething like this:
+
+int main() {
+    try {
+        std::string tap0 = system("ip link set tap0 up");
+        std::string tap1 = system("ip link set tap1 up");
+        std::string tap2 = system("ip link set tap2 up");
+        std::string tap3 = system("ip link set tap3 up");
+        std::string tap4 = system("ip link set tap4 up");
+        std::string tap5 = system("ip link set tap5 up");
+
+        // The libnet initializing that was here I think should be 
+        // done in the DCE constructor.  It's was also duplicated in
+        // the Cmd constructor.  The Cmd construcrtor can do
+        // addCommands() but I think DCE should initialize the taps 
+        // with libnet and pcap
+
+        // Create DCE instances for each TAP device
+        auto dce0 = std::make_shared<DCE>(tap0);
+        auto dce1 = std::make_shared<DCE>(tap1);
+        auto dce2 = std::make_shared<DCE>(tap2);
+        auto dce3 = std::make_shared<DCE>(tap3);
+        auto dce4 = std::make_shared<DCE>(tap4);
+        auto dce5 = std::make_shared<DCE>(tap5);
+
+        // Create Observers for each DCE instance
+        auto observer0 = std::make_shared<RxObserver>();
+        auto observer1 = std::make_shared<RxObserver>();
+        auto observer2 = std::make_shared<RxObserver>();
+        auto observer3 = std::make_shared<RxObserver>();
+        auto observer4 = std::make_shared<RxObserver>();
+        auto observer5 = std::make_shared<RxObserver>();
+
+        // Attach Observers
+        dce0->attach(observer0);
+        dce1->attach(observer1);
+        dce2->attach(observer2);
+        dce3->attach(observer3);
+        dce4->attach(observer4);
+        dce5->attach(observer5);
+
+        // Start packet capture
+        dce0->startCapture();
+        dce1->startCapture();
+        dce2->startCapture();
+        dce3->startCapture();
+        dce4->startCapture();
+        dce5->startCapture();
+
+        // Don't need the addComand() stuff here now, done in Cmd
+        Cmd commandProcessor; // This constructo will create commands
+        std::cout << "DCE is running.\nEnter command: " << std::endl;
+        std::string input;
+        while (std::getline(std::cin, input)) {
+            if(input == "exit")
+            {
+                break;
+            }
+            commandProcessor.executeCommand(input);
+            std::cout << "Enter command: " << std::endl;
+        }
+
+        // Stop packet capture
+        dce0->stopCapture();
+        dce1->stopCapture();
+        dce2->stopCapture();
+        dce3->stopCapture();
+        dce4->stopCapture();
+        dce5->stopCapture();
+
+        // The cleanup libnet stuff that was here can go to the DCE
+        // destructor.
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+Pasting in those createTapDevice() lines above made my wonder if our taps have mac addresses assigned to them:
+
+std::string createTapDevice(const std::string& tapName) {
+    int tap_fd = open("/dev/net/tun", O_RDWR);
+    if (tap_fd < 0) {
+        throw std::runtime_error("Failed to open /dev/net/tun");
+    }
+
+    struct ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tap_fd, TUNSETIFF, &ifr) < 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to create TAP device " + tapName);
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to bring TAP device up");
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return tapName;
+}
+
+When I've stepped through it with the debugger it's the system call that's responsible for creating the tap.  Does that mean that all the low level stuff isn't don't by our code.  Maybe I'd get by with just system calls, like I have above in the proposed main.
+
+Functionally if I did main() the way it is above, create and initialize the 6 taps in DCE and destroy them in the DCE destructor and create the commands send and recv in the Cmd constructor the wouldn't I have 6 bidirectional channels like I want for cmd?
+
+And here's another thought.  If I ship cmd with the main() like I just described which is functional, not shameful, but could use improvement it might feed into the bios model because I have every intention of building and os on top of this cmd core component and at some point I can upgrade the bios and swap it out later through some sort of clever mechanism.  It'll be fun.
+
+//////////////////////
+
+There's a slight error with the Cmd constructor or lack thereof:
+
+src/main.cpp: In function ‘int main()’:
+src/main.cpp:29:37: error: no matching function for call to ‘Cmd::Cmd(std::vector<std::shared_ptr<DCE> >&)’
+   29 |         Cmd commandProcessor(dceList);
+      |                                     ^
+In file included from src/main.cpp:6:
+include/Cmd.hpp:8:7: note: candidate: ‘Cmd::Cmd()’
+    8 | class Cmd {
+      |       ^~~
+
+I'd like to use that nice neat main() that you made for me so I hope you can solve this compile error.
+
+Then we'll have to head over to DCE and make sure it's constructor creates taps, gives them mac addresses (let's hard code them according to the tap-to-mac table for cmd for now) and initializes them with libnet and pcap.  And then I think we'll have to finish off with Cmd constructor who will make the send and recv commands and connect send to transmitFrame() and recv to getNextPacket() or some such similar thing.
+
+/////////////////////
+
+Hi partner, it's morning for me again and I'm happy and excited to put your latest files to work, but I'm having trouble not getting confused, and I'm almost certain to make a mess.
+
+The new Cmd.cpp and DCE.cpp look like a solid effort in creating some SoC where some was needed in getting all the tap and libnet stuff over into DCE (an observer subject, if I'm not mistaken) and getting the command stuff in Cmd.
+
+Some of the Cmd methods that are presently in place need to stay like parseCommand(), but they have an inferior replacement, as I understand, so 
+
+std::vector<std::string> Cmd::tokenize(const std::string& str) {
+    std::vector<std::string> tokens;
+    std::istringstream iss(str);
+    std::string token;
+    while (iss >> token) tokens.push_back(token);
+    return tokens;
+}
+
+void Cmd::run() {
+    std::string command;
+    while (true) {
+        std::cout << "cmd> ";
+        std::getline(std::cin, command);
+        
+        if (command == "exit") break;
+        
+        auto tokens = tokenize(command);
+        if (!tokens.empty()) {
+            executeCommand(tokens[0], std::vector<std::string>(tokens.begin() + 1, tokens.end()));
+        } else {
+            std::cout << "Unknown command.\n";
+        }
+    }
+}
+
+as I understand should be replaced by something like the old way, but here in Cmd, instead of where it used to be we should have a run/parseCommand/args whereas above there is a run/tokenize/token setup:
+
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (std::getline(iss, token, ' ')) {  // Read tokens by space
+        if (!token.empty()) {
+            if (token.front() == '"' && !inQuotes) {
+                inQuotes = true;
+                quotedString = token.substr(1);  // Remove leading quote
+            } else if (token.back() == '"' && inQuotes) {
+                inQuotes = false;
+                quotedString += " " + token.substr(0, token.length() - 1);  // Remove trailing quote
+                args.push_back(quotedString);
+            } else if (inQuotes) {
+                quotedString += " " + token;
+            } else {
+                args.push_back(token);
+            }
+        }
+    }
+
+    return args;
+}
+
+void Cmd::run() {
+    std::string command;
+    while (true) {
+        std::cout << "cmd> ";
+        std::getline(std::cin, command);
+        
+        if (command == "exit") break;
+        
+        auto tokens = tokenize(command);
+        if (!tokens.empty()) {
+            executeCommand(tokens[0], std::vector<std::string>(tokens.begin() + 1, tokens.end()));
+        } else {
+            std::cout << "Unknown command.\n";
+        }
+    }
+}
+
+And I'd like to separate the implementations from the declarations and the Cmd constructor I don't know how to separate when it's written like this:
+
+    Cmd::Cmd(std::vector<std::shared_ptr<DCE>>& dces) : dceList(dces) {
+
+
+And then there's DCE and all of the place holder in the methods, which isn't a big deal on its own but the amount of shuffling around of code it looks like I have to do will be very error prone, especially when I didn't write the code and don't have as deep of a feel for the code and the associations and relationships between all of the program code elements.
+
+I'd like you to look at my existing code and your latest proposed code and fix the run/tokenize/token arrangement in Cmd and make it the one we agree is superior which is the run/parseCommand/args arrangement.  Split the Cmd constructor into declaration and implementation in Cmd.hpp and Cmd.cpp respectively.
+
+So, if I'm not mistaken, Cmd should end up having:
+
+Cmd()
+addCommand()
+send
+recv
+run()
+parseCommand()
+executeCommand()
+
+DCE now has getNextPacket() and that used to be in RxObserver and I'm not sure how to move that or if it even has to be moved.
+
+Anyway, we have to figure out a way for you to do the coding of all of this mixing together of how things are and how they should be between Cmd.cpp, Cmd.hpp, DCE.cpp, DCE.hpp, RxObserver and main().  If it easy for you to do, please just go ahead and do it otherwise let's consult with each other on how we can work together to facilitate this.
+
+//////////////////////
+
+These are the errors:
+
+include/Command.hpp:12:5: note: candidate: ‘Command::Command(std::string, CommandFunction)’
+   12 |     Command(std::string name, CommandFunction func);
+      |     ^~~~~~~
+include/Command.hpp:12:5: note:   candidate expects 2 arguments, 0 provided
+include/Command.hpp:8:7: note: candidate: ‘Command::Command(const Command&)’
+    8 | class Command {
+      |       ^~~~~~~
+include/Command.hpp:8:7: note:   candidate expects 1 argument, 0 provided
+include/Command.hpp:8:7: note: candidate: ‘Command::Command(Command&&)’
+include/Command.hpp:8:7: note:   candidate expects 1 argument, 0 provided
+In file included from src/DCE.cpp:1:
+include/DCE.hpp:27:10: error: extra qualification ‘DCE::’ on member ‘initializeTAP’ [-fpermissive]
+   27 |     bool DCE::initializeTAP();
+      |          ^~~
+include/DCE.hpp:28:10: error: extra qualification ‘DCE::’ on member ‘initializeLibnet’ [-fpermissive]
+   28 |     bool DCE::initializeLibnet();
+      |          ^~~
+include/DCE.hpp:29:10: error: extra qualification ‘DCE::’ on member ‘initializePcap’ [-fpermissive]
+   29 |     bool DCE::initializePcap();
+      |          ^~~
+include/DCE.hpp:35:5: error: extra qualification ‘DCE::’ on member ‘DCE’ [-fpermissive]
+   35 |     DCE::DCE(const std::string& tapName, const std::string& macAddress);
+      |     ^~~
+include/DCE.hpp:37:17: error: extra qualification ‘DCE::’ on member ‘getNextPacket’ [-fpermissive]
+   37 |     std::string DCE::getNextPacket();
+      |                 ^~~
+include/DCE.hpp:45:17: error: extra qualification ‘DCE::’ on member ‘getMacAddress’ [-fpermissive]
+   45 |     std::string DCE::getMacAddress() const;
+      |                 ^~~
+src/DCE.cpp: In constructor ‘DCE::DCE(const std::string&, const std::string&)’:
+src/DCE.cpp:5:89: error: class ‘DCE’ does not have any field named ‘macAddress’
+    5 | DCE::DCE(const std::string& tapName, const std::string& macAddress) : tapName(tapName), macAddress(macAddress) {
+      |                                                                                         ^~~~~~~~~~
+src/DCE.cpp: In member function ‘std::string DCE::getMacAddress() const’:
+src/DCE.cpp:103:12: error: ‘macAddress’ was not declared in this scope; did you mean ‘getMacAddress’?
+  103 |     return macAddress;
+      |            ^~~~~~~~~~
+      |            getMacAddress
+
+/////////////////////////////
+
+Here's main():
+
+#include "DCE.hpp"
+#include "Command.hpp"
+#include "Cmd.hpp"
+#include <iostream>
+#include <stdexcept>
+#include <cstring>
+#include <fcntl.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <cstdlib>
+#include <memory>
+#include "RxObserver.hpp"
+#include <pcap.h>
+#include <libnet.h>
+#include "EthernetFrame.hpp"
+
+// Function to create a TAP device
+std::string createTapDevice(const std::string& tapName) {
+    int tap_fd = open("/dev/net/tun", O_RDWR);
+    if (tap_fd < 0) {
+        throw std::runtime_error("Failed to open /dev/net/tun");
+    }
+
+    struct ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tap_fd, TUNSETIFF, &ifr) < 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to create TAP device " + tapName);
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to bring TAP device up");
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return tapName;
+}
+
+int main() {
+    try {
+        std::string tap0 = createTapDevice("tap0");
+        std::string tap1 = createTapDevice("tap1");
+
+        // Initialize libnet
+        char errbuf[LIBNET_ERRBUF_SIZE];
+        libnet_t *lnet0 = libnet_init(LIBNET_LINK, tap0.c_str(), errbuf);
+        libnet_t *lnet1 = libnet_init(LIBNET_LINK, tap1.c_str(), errbuf);
+        if (!lnet0 || !lnet1) {
+            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+        }
+
+        // Create DCE instances for each TAP device
+        auto dce0 = std::make_shared<DCE>(tap0);
+        auto dce1 = std::make_shared<DCE>(tap1);
+
+        // Create Observers for each DCE instance
+        auto observer0 = std::make_shared<RxObserver>();
+        auto observer1 = std::make_shared<RxObserver>();
+
+        // Attach Observers
+        dce0->attach(observer0);
+        dce1->attach(observer1);
+
+        // Start packet capture
+        dce0->startCapture();
+        dce1->startCapture();
+
+        // Command execution setup
+        Cmd commandProcessor;
+        commandProcessor.addCommand("dce_transmit", [&dce0](const std::vector<std::string>& args) {
+            if (args.size() < 3) {
+                std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
+                return;
+            }
+            
+            std::array<uint8_t, 6> srcMac;
+            std::array<uint8_t, 6> dstMac;
+            std::vector<uint8_t> payload(args[2].begin(), args[2].end());
+            
+            // Convert MAC addresses from string to byte array
+            sscanf(args[0].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &srcMac[0], &srcMac[1], &srcMac[2], &srcMac[3], &srcMac[4], &srcMac[5]);
+            sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
+            
+            EthernetFrame frame(srcMac, dstMac, payload);
+            dce0->transmitFrame(frame);
+            std::cout << "Transmitted data: " << args[2] << std::endl;
+        });
+
+        std::cout << "DCE is running.\nEnter command: " << std::endl;
+        std::string input;
+        while (std::getline(std::cin, input)) {
+            if(input == "exit")
+            {
+                break;
+            }
+            commandProcessor.executeCommand(input);
+            std::cout << "Enter command: " << std::endl;
+        }
+
+        // Stop packet capture
+        dce0->stopCapture();
+        dce1->stopCapture();
+
+        // Cleanup libnet
+        libnet_destroy(lnet0);
+        libnet_destroy(lnet1);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+Fix these:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/DCE.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/main.cpp: In function ‘int main()’:
+src/main.cpp:68:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘attach’
+   68 |         dce0->attach(observer0);
+      |               ^~~~~~
+src/main.cpp:69:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘attach’
+   69 |         dce1->attach(observer1);
+      |               ^~~~~~
+src/main.cpp:72:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘startCapture’
+   72 |         dce0->startCapture();
+      |               ^~~~~~~~~~~~
+src/main.cpp:73:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘startCapture’
+   73 |         dce1->startCapture();
+      |               ^~~~~~~~~~~~
+src/main.cpp:76:13: error: no matching function for call to ‘Cmd::Cmd()’
+   76 |         Cmd commandProcessor;
+      |             ^~~~~~~~~~~~~~~~
+In file included from src/main.cpp:3:
+
+/////////////////////////
+
+Fix these:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/DCE.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Cmd.cpp: In constructor ‘Cmd::Cmd(std::vector<std::shared_ptr<DCE> >&)’:
+src/Cmd.cpp:5:53: error: class ‘Cmd’ does not have any field named ‘dceList’
+    5 | Cmd::Cmd(std::vector<std::shared_ptr<DCE>>& dces) : dceList(dces) {
+      |                                                     ^~~~~~~
+src/Cmd.cpp: In member function ‘void Cmd::addCommand(const std::string&, std::function<void(const std::vector<std::__cxx11::basic_string<char> >&)>)’:
+src/Cmd.cpp:11:22: error: no match for ‘operator=’ (operand types are ‘std::unordered_map<std::__cxx11::basic_string<char>, Command>::mapped_type’ {aka ‘Command’} and ‘std::function<void(const std::vector<std::__cxx11::basic_string<char> >&)>’)
+   11 |     commands[name] = func;
+      |                      ^~~~
+In file included from include/Cmd.hpp:4,
+                 from src/Cmd.cpp:1:
+
+With your knowlege of the other files in the cmd project fix main() and whatever else in the cmd code base that you're aware of to fix the compiler errors.
+ 
+//////////////////////
+
+Ok partner, we're almost there.  Fix these:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/DCE.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Command.cpp:4:36: error: ‘CommandFunction’ has not been declared
+    4 | Command::Command(std::string name, CommandFunction func)
+      |                                    ^~~~~~~~~~~~~~~
+src/Command.cpp:4:1: error: no declaration matches ‘Command::Command(std::string, int)’
+    4 | Command::Command(std::string name, CommandFunction func)
+      | ^~~~~~~
+In file included from src/Command.cpp:1:
+include/Command.hpp:8:7: note: candidates are: ‘Command::Command(Command&&)’
+    8 | class Command {
+      |       ^~~~~~~
+include/Command.hpp:8:7: note:                 ‘Command::Command(const Command&)’
+include/Command.hpp:10:5: note:                 ‘Command::Command(const std::string&, std::function<void(const std::vector<std::__cxx11::basic_string<char> >&)>)’
+   10 |     Command(const std::string& name, std::function<void(const std::vector<std::string>&)> func)
+      |     ^~~~~~~
+include/Command.hpp:8:7: note: ‘class Command’ defined here
+    8 | class Command {
+      |       ^~~~~~~
+src/Command.cpp:11:6: error: redefinition of ‘void Command::execute(const std::vector<std::__cxx11::basic_string<char> >&) const’
+   11 | void Command::execute(const std::vector<std::string>& args) const {
+      |      ^~~~~~~
+include/Command.hpp:13:10: note: ‘void Command::execute(const std::vector<std::__cxx11::basic_string<char> >&) const’ previously defined here
+   13 |     void execute(const std::vector<std::string>& args) const {
+      |          ^~~~~~~
+src/Command.cpp:15:19: error: no declaration matches ‘const std::string Command::getName() const’
+   15 | const std::string Command::getName() const {
+      |                   ^~~~~~~
+src/Command.cpp:15:19: note: no functions named ‘const std::string Command::getName() const’
+include/Command.hpp:8:7: note: ‘class Command’ defined here
+    8 | class Command {
+      |       ^~~~~~~
+
+
+With your knowlege of the other files in the cmd project fix main() and whatever else in the cmd code base that you're aware of to fix the compiler errors.
+
+////////////////////
+
+
+

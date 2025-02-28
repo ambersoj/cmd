@@ -11,30 +11,18 @@
 #include <memory>
 #include <stdexcept>
 
-class DCE : public ISubject {
-private:
-    std::thread captureThread;
-    std::atomic<bool> running;
-
-    std::string tapName;
-    pcap_t* pcapHandle;
-    char errbuf[PCAP_ERRBUF_SIZE];
-    std::vector<std::shared_ptr<IObserver>> observers;
-    bool capturing;
-    libnet_t* lnet;
-
-    static void packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
-
+class DCE {
 public:
-    explicit DCE(const std::string& tap);
-    ~DCE();
-
-    void attach(std::shared_ptr<IObserver> observer) override;
-    void detach(std::shared_ptr<IObserver> observer) override;
-    void notify(const std::vector<uint8_t>& packet) override;
-    void startCapture();
-    void stopCapture();
-    void transmitFrame(const EthernetFrame& frame);
+    DCE(const std::string& tapName, const std::string& macAddress);
+    bool initializeTAP();
+    bool initializeLibnet();
+    bool initializePcap();
+    void transmitFrame(const std::string &dstMac, const std::string &data);
+    std::string getNextPacket();
+    std::string getMacAddress() const;
+private:
+    std::string tapName;
+    std::string macAddress;
 };
 
 #endif // DCE_HPP
