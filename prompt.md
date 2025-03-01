@@ -3056,6 +3056,31 @@ skips over the payload handling.  What it wants for data to transmit which is:
 
 arg[3] = "48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21"
 
+////////////////
+
+This is a cool system, partner.  Thanks for the help.  I couldn't have done this without you.
+
+I can see the frames being transmitted on wireshark with this command:
+
+
+send 0 00:11:22:33:44:01 00:11:22:33:44:00 48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21
+
+it's addressed to tap1 but tap1 on wiresharkk doesn't see it.  I tried a bridge and still there's nothing at tap1:
+
+root@PRED:/usr/local/cmd# brctl addbr br0
+root@PRED:/usr/local/cmd# sudo brctl addif br0 tap0
+root@PRED:/usr/local/cmd# sudo brctl addif br0 tap1
+root@PRED:/usr/local/cmd# ip link show | grep tap
+244: tap0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UNKNOWN mode DEFAULT group default qlen 1000
+245: tap1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UNKNOWN mode DEFAULT group default qlen 1000
+246: tap2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+247: tap3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+248: tap4: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+249: tap5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+
+How's this for a plan?  I can clone the git repo and make a cmd executable and run it in a differnet window that has another set of mac addresses, as though it was another component of mpp - and try to send on one and recv on the other.
+
+///////////////////
 
 
 
