@@ -1,5 +1,6 @@
 #include "Cmd.hpp"
 #include "COM.hpp"
+#include <libnet.h>
 #include <iostream>
 #include <sstream>
 
@@ -70,7 +71,7 @@ Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
         parseMacAddress(args[1], dstMac);
 
         // Parse source MAC
-        parseMacAddress(args[1], srcMac);
+        parseMacAddress(args[2], srcMac);
 
         std::vector<uint8_t> payload;
         std::stringstream ss(args[3]);
@@ -84,7 +85,9 @@ Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
         EthernetFrame frame(srcMac, dstMac, payload);
 
         // Now call transmitFrame() with the correct type
-        comList[dceIndex]->transmitFrame(frame);
+//        comList[dceIndex]->transmitFrame(frame);
+        comList[dceIndex]->sendPing(comList[0]);
+        
     });
 
     addCommand("recv", [this](const std::vector<std::string>& args) {

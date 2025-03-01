@@ -1752,7 +1752,6 @@ executeCommand()
 
 DCE now has getNextPacket() and that used to be in RxObserver and I'm not sure how to move that or if it even has to be moved.
 
-<<<<<<< HEAD
 Anyway, we have to figure out a way for you to do the coding of all of this mixing together of how things are and how they should be between Cmd.cpp, Cmd.hpp, DCE.cpp, DCE.hpp, RxObserver and main().  If it easy for you to do, please just go ahead and do it otherwise let's consult with each other on how we can work together to facilitate this.
 
 //////////////////////
@@ -3083,7 +3082,306 @@ How's this for a plan?  I can clone the git repo and make a cmd executable and r
 
 ///////////////////
 
+These are the taps and macs for the cmd running at /usr/local/cmd:
 
-=======
->>>>>>> origin/main
+        ("cmd0", "02:00:00:00:00:01")
+        ("cmd1", "02:00:00:00:00:02")
+        ("cmd2", "02:00:00:00:00:03")
+        ("cmd3", "02:00:00:00:00:04")
+        ("cmd4", "02:00:00:00:00:05")
+        ("cmd5", "02:00:00:00:00:06")
+
+These are the taps and macs for the cloned cmd that I called hud running at /usr/local/cmd_test/cmd:
+
+        ("hud0", "02:00:00:00:01:01")
+        ("hud1", "02:00:00:00:01:02")
+        ("hud2", "02:00:00:00:01:03")
+        ("hud3", "02:00:00:00:01:04")
+        ("hud4", "02:00:00:00:01:05")
+        ("hud5", "02:00:00:00:01:06")
+
+
+These are my send commands:
+
+put in cmd to send to hud
+send 0 02:00:00:00:01:01 02:00:00:00:00:01 48:65:6C:6C:6F:20:68:75:64:30:20:66:72:6F:6D:20:63:6D:64:30:20:21:21:21
+
+put in hud to send to cmd
+send 0 02:00:00:00:00:01 02:00:00:00:01:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
+
+I see the taps are all up and I can see on wiretap the packets going out.  I've tried putting a bridge up but I haven't gotten around to doing much of that yet.
+
+I can run a recv <0 - 5> and it runs.  I don't see the frame transmitted on wire shark and I don't see the frame in recv commands either.
+
+Do you have any ideas for testing.  Like do I need to apply bridges?  I would have expected that when the mac address of the hud was put into the cmd tx frame it would have went through those taps.  The macs I chose should be good locally administrated macs.
+
+////////////////////////
+
+Hey check out these screen shots.  This is the transmission leaving cmd0:
+
+root@PRED:/usr/local/cmd# tcpdump -i cmd0 -e -xx
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on cmd0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+22:36:41.309725 02:00:00:00:00:01 (oui Unknown) > 02:00:00:00:01:01 (oui Unknown), ethertype IPv4 (0x0800), length 38: truncated-ip - 27732 bytes missing! 114.111.109.32 > 99-109-100-48.lightspeed.rcsntx.sbcglobal.net: dsr
+        0x0000:  0200 0000 0101 0200 0000 0001 0800 4865
+        0x0010:  6c6c 6f20 6875 6430 2066 726f 6d20 636d
+        0x0020:  6430 2021 2121
+
+
+But this is the output of the hud tcpdump:
+
+root@PRED:/usr/local/cmd_temp/cmd# tcpdump -i hud0 -e -xx
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on hud0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+
+I wonder if I need to create a bridge and bring it up?
+
+///////////////////////
+
+I've got a feeling that the coms aren't getting mac addresses assigned in an operatioally meaningful way:
+
+
+root@PRED:/usr/local/cmd# brctl showmacs br1
+port no mac addr                is local?       ageing timer
+  1     36:9b:e5:b4:f0:01       yes                0.00
+  1     36:9b:e5:b4:f0:01       yes                0.00
+  2     8a:41:a6:22:ad:c4       yes                0.00
+  2     8a:41:a6:22:ad:c4       yes                0.00
+
+Our macs don't show up.  But if I kill br1 then these macs disappear.  The mac with port no 1 is cmd and the other one is hud, and I don't know why they get those mac addresses and I don't know why they both show up twice.  I havn't seen anything I recognize with recv 0.
+
+I'm not too good as of yet with command line network linux tools and I'm grateful for the helpful commands.
+
+/////////////////////////////////
+
+Here's the bridge info now:
+
+root@PRED:/usr/local/cmd# brctl showmacs br1
+port no mac addr                is local?       ageing timer
+  1     02:00:00:00:00:01       yes                0.00
+  1     02:00:00:00:00:01       yes                0.00
+  2     02:00:00:00:01:01       yes                0.00
+  2     02:00:00:00:01:01       yes                0.00
+root@PRED:/usr/local/cmd# 
+
+but my messages still just appear on the transmit side.
+
+0000   02 00 00 00 00 01 02 00 00 00 01 01 08 00 48 65   ..............He
+0010   6c 6c 6f 20 63 6d 64 30 20 66 72 6f 6d 20 68 75   llo cmd0 from hu
+0020   64 30 20 21 21 21                                 d0 !!!
+
+Here's how the message shows in wireshark in the hud to cmd direction.
+
+0000   02 00 00 00 01 01 02 00 00 00 00 01 08 00 48 65   ..............He
+0010   6c 6c 6f 20 68 75 64 30 20 66 72 6f 6d 20 63 6d   llo hud0 from cm
+0020   64 30 20 21 21 21                                 d0 !!!
+
+Here's how the message shows in wireshark in the cmd to hud direction.
+
+But this is interesting. Wireshark is showing src and dst IP addresses instead of mac in the log capture window pane:
+
+src ip = 104.111.109.32
+dst ip = 104.117.100.48
+
+So in our low level tap config maybe we're not getting into a layer 2 tap.  In the ip commands do we have to specify layer 2, ethernet or link (like libnet)?
+
+////////////////////////
+
+Here's some screen output:
+
+root@PRED:/usr/local/cmd# ip addr show cmd0
+ip addr show hud0
+375: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::ff:fe00:1/64 scope link 
+       valid_lft forever preferred_lft forever
+382: hud0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN group default qlen 1000
+    link/ether 02:00:00:00:01:01 brd ff:ff:ff:ff:ff:ff
+    inet6 fe80::ff:fe00:101/64 scope link 
+       valid_lft forever preferred_lft forever
+root@PRED:/usr/local/cmd# ip addr flush dev cmd0
+ip addr flush dev hud0
+root@PRED:/usr/local/cmd# ip addr show cmd0
+ip addr show hud0
+375: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+382: hud0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN group default qlen 1000
+    link/ether 02:00:00:00:01:01 brd ff:ff:ff:ff:ff:ff
+root@PRED:/usr/local/cmd# 
+
+It looks like after the flush this line disappeared:
+
+       valid_lft forever preferred_lft forever
+
+
+ip tuntap show:
+
+root@PRED:/usr/local/cmd# ip tuntap show
+cmd0: tap
+cmd1: tap
+cmd2: tap
+cmd3: tap
+cmd4: tap
+cmd5: tap
+hud0: tap
+hud1: tap
+hud2: tap
+hud3: tap
+hud4: tap
+hud5: tap
+
+Hey, this might be crazy and in a way doesn't seem like it could be true but I'm vaguely remember thing with a nic not working while working in ethernet until I put a proper src IP address, which at the time was probably 192.168.0.101.  Do I have access to that part of the EthernetFrame.  Maybe I should try putting something reasonable in the IP fields, instead of the jibberish that's coming from a mysterious source.
+
+///////////////////////
+
+Wireshark always calls it a malfromed packet.  Could we stuff the frame with a ping?  It won't get response but it also will be a valid frame.  We're still getting garbage for IP addresses in wireshark.  Is there a way in our cmd program to set those IP addresses?
+
+There doesn't appear to be access for setting any IPs here:
+
+   libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+
+But I didn't use libnet_buid_ethernet, I'm pretty sure.  How I built my frame I got to put an IP address in.
+
+/////////////////////////////////
+
+There's a little issue with send_ping.cpp
+
+root@PRED:/usr/local/cmd# g++ -o send_ping send_ping.cpp -lnet
+send_ping.cpp: In function ‘void sendPing(libnet_t*, const uint8_t*, const uint8_t*)’:
+send_ping.cpp:12:9: error: invalid conversion from ‘uint8_t*’ {aka ‘unsigned char*’} to ‘uint16_t’ {aka ‘short unsigned int’} [-fpermissive]
+   12 |         payload, payload_size,
+      |         ^~~~~~~
+      |         |
+      |         uint8_t* {aka unsigned char*}
+send_ping.cpp:12:18: error: invalid conversion from ‘uint16_t’ {aka ‘short unsigned int’} to ‘const uint8_t*’ {aka ‘const unsigned char*’} [-fpermissive]
+   12 |         payload, payload_size,
+      |                  ^~~~~~~~~~~~
+      |                  |
+      |                  uint16_t {aka short unsigned int}
+send_ping.cpp:13:9: error: invalid conversion from ‘libnet_t*’ {aka ‘libnet_context*’} to ‘uint32_t’ {aka ‘unsigned int’} [-fpermissive]
+   13 |         lnet, 0
+      |         ^~~~
+      |         |
+      |         libnet_t* {aka libnet_context*}
+send_ping.cpp:10:53: error: too few arguments to function ‘libnet_ptag_t libnet_build_icmpv4_echo(uint8_t, uint8_t, uint16_t, uint16_t, uint16_t, const uint8_t*, uint32_t, libnet_t*, libnet_ptag_t)’
+   10 |     libnet_ptag_t icmpTag = libnet_build_icmpv4_echo(
+      |                             ~~~~~~~~~~~~~~~~~~~~~~~~^
+   11 |         8, 0, 0, 1234,  // Type, Code, Checksum, ID
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  
+   12 |         payload, payload_size,
+      |         ~~~~~~~~~~~~~~~~~~~~~~                       
+   13 |         lnet, 0
+      |         ~~~~~~~                                      
+   14 |     );
+      |     ~                                                
+In file included from /usr/include/libnet.h:119,
+                 from send_ping.cpp:1:
+/usr/include/libnet/libnet-functions.h:688:1: note: declared here
+  688 | libnet_build_icmpv4_echo(uint8_t type, uint8_t code, uint16_t sum,
+      | ^~~~~~~~~~~~~~~~~~~~~~~~
+send_ping.cpp:26:33: warning: ISO C++ forbids converting a string constant to ‘char*’ [-Wwrite-strings]
+   26 |         libnet_name2addr4(lnet, "192.168.100.1", LIBNET_DONT_RESOLVE),  // Source IP
+      |                                 ^~~~~~~~~~~~~~~
+send_ping.cpp:27:33: warning: ISO C++ forbids converting a string constant to ‘char*’ [-Wwrite-strings]
+   27 |         libnet_name2addr4(lnet, "192.168.100.2", LIBNET_DONT_RESOLVE),  // Destination IP
+      |                                 ^~~~~~~~~~~~~~~
+root@PRED:/usr/local/cmd# 
+
+
+It looks like something might have gotten misaligned here:
+
+    libnet_ptag_t icmpTag = libnet_build_icmpv4_echo(
+        8, 0, 0, 1234,  // Type, Code, Checksum, ID
+        payload, payload_size,
+        lnet, 0
+    );
+
+/////////////////////////////////////
+
+The send_ping program makes a nike ping frame.  It shows up at cmd0, even thought you said look at hud0.  Wireshark shows source IP as 192.168.100.1 and destination IP as 192.168.100.2
+
+////////////////////////////////////
+
+The send ping arrives with the right mac addresses and ICMP PING TEST payload.  I messed with send_ping to go to both cmd0 and hud0.  Let's try to send and icmp ping in the cmd program now.  How can I set the EthernetFrame in cmd as in send_ping?
+
+////////////////////////////
+
+The frame is first made in it's constructor in the command send:
+
+        EthernetFrame frame(srcMac, dstMac, payload);
+
+and from what I gather from that it goes on to do this below:
+
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+
+void COM::transmitFrame(const EthernetFrame& frame) {
+    libnet_clear_packet(lnet);
+
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+}
+
+I'm not so sure I know how to get the code you sent into the cmd program so it'll work.
+I'd like some help, if you don't mind, partner.
+
+Somehow I've got to get a com into sendPing(com) and this is lines 88 and 89 of Cmd.cpp where addCommand() is doing send():
+
+        comList[dceIndex]->transmitFrame(frame);
+        comList[dceIndex]->sendPing(comList[0]);
+
+I have this in COM.hpp:
+
+    void sendPing(COM& com);
+
+Here's the compiler output:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Cmd.cpp: In lambda function:
+src/Cmd.cpp:89:36: error: cannot convert ‘__gnu_cxx::__alloc_traits<std::allocator<std::shared_ptr<COM> >, std::shared_ptr<COM> >::value_type’ {aka ‘std::shared_ptr<COM>’} to ‘COM&’
+   89 |         comList[dceIndex]->sendPing(comList[0]);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+In file included from include/Cmd.hpp:5,
+                 from src/Cmd.cpp:1:
+include/COM.hpp:20:24: note:   initializing argument 1 of ‘void COM::sendPing(COM&)’
+   20 |     void sendPing(COM& com);
+      |                   ~~~~~^~~
+root@PRED:/usr/local/cmd# 
+
+Hopefully you'll have a way to mold the cmd to get those types right.  Then maybe I could just comment out the transmitFrame(frame) line and let a send command just send a ping like this:
+
+//        comList[dceIndex]->transmitFrame(frame);
+        comList[dceIndex]->sendPing(comList[0]);
+
+or
+
+//        comList[dceIndex]->transmitFrame(frame);
+        comList[dceIndex]->sendPing(comList[dceIndex]);
+ 
+////////////////////////
+
+
+
+
 

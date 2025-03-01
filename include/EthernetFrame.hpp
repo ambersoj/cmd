@@ -18,9 +18,9 @@ public:
     std::vector<uint8_t> serialize() const;
     static EthernetFrame deserialize(const std::vector<uint8_t>& data);
 
-    void setSrcMac(const std::array<uint8_t, 6>& mac);
-    void setDstMac(const std::array<uint8_t, 6>& mac);
-    void setPayload(const std::vector<uint8_t>& data);
+    void setSrcMac(const std::array<uint8_t, 6>& srcMac);
+    void setDstMac(const std::array<uint8_t, 6>& dstMac);
+    void setPayload(const std::vector<uint8_t>& payload);
     
     const std::array<uint8_t, 6>& getSrcMac() const;
     const std::array<uint8_t, 6>& getDstMac() const;

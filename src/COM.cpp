@@ -22,6 +22,8 @@ COM::COM(const std::string& tapName, const std::string& macAddress)
         throw std::runtime_error("Failed to initialize pcap for " + tapName);
     }
 
+    startCapture();
+
     std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
 }
 
@@ -94,6 +96,57 @@ void COM::transmitFrame(const EthernetFrame& frame) {
     if (bytesWritten == -1) {
         throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
     }
+}
+
+void COM::sendPing(std::shared_ptr<COM> com) {
+    libnet_t* lnet = com->getLibnetHandle();  // Get libnet handle from COM
+
+    std::array<uint8_t, 6> srcMac = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+    std::array<uint8_t, 6> dstMac = {0x02, 0x00, 0x00, 0x00, 0x01, 0x01};
+
+    uint32_t srcIP = libnet_name2addr4(lnet, (char*)"192.168.100.1", LIBNET_DONT_RESOLVE);
+    uint32_t dstIP = libnet_name2addr4(lnet, (char*)"192.168.100.2", LIBNET_DONT_RESOLVE);
+
+    libnet_clear_packet(lnet);
+
+    // 🏗 Build ICMP Packet
+    uint8_t payload[] = "ICMP PING TEST";
+    uint32_t payloadSize = sizeof(payload) - 1;
+
+    libnet_ptag_t icmpTag = libnet_build_icmpv4_echo(
+        8, 0, 0, 1234, 1,  // Type, Code, Checksum, ID, Sequence
+        payload, payloadSize,
+        lnet, 0
+    );
+    if (icmpTag == -1) {
+        throw std::runtime_error("ICMP build error: " + std::string(libnet_geterror(lnet)));
+    }
+
+    // 🏗 Build IP Header
+    libnet_ptag_t ipTag = libnet_build_ipv4(
+        LIBNET_IPV4_H + LIBNET_ICMPV4_ECHO_H + payloadSize, 
+        0, 12345, 0, 64, IPPROTO_ICMP, 0, srcIP, dstIP,
+        NULL, 0, lnet, 0
+    );
+    if (ipTag == -1) {
+        throw std::runtime_error("IP build error: " + std::string(libnet_geterror(lnet)));
+    }
+
+    // 🔥 Get raw packet data
+    uint8_t* packetData = nullptr;
+    uint32_t packetSize = 0;
+    packetData = libnet_getpbuf(lnet, packetSize);
+    if (!packetData) {
+        throw std::runtime_error("Failed to get packet buffer: " + std::string(libnet_geterror(lnet)));
+    }
+
+    // 🏗 Wrap into EthernetFrame
+    std::vector<uint8_t> ethPayload(packetData, packetData + packetSize);
+    EthernetFrame frame(srcMac, dstMac, ethPayload);
+
+    // 🚀 Transmit!
+    com->transmitFrame(frame);
+    std::cout << "ICMP Ping sent!" << std::endl;
 }
 
 void COM::attach(std::shared_ptr<IObserver> observer) {

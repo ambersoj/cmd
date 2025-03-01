@@ -12,16 +12,12 @@
 #include <mutex>
 #include <thread>
 
-constexpr std::array<const char*, 6> MAC_ADDRESSES = {
-    "00:11:22:33:44:00", "00:11:22:33:44:01", "00:11:22:33:44:02",
-    "00:11:22:33:44:03", "00:11:22:33:44:04", "00:11:22:33:44:05"
-};
-
 class COM {
 public:
     COM(const std::string& tapName, const std::string& macAddress);
 
     void transmitFrame(const EthernetFrame& frame);  // Updated signature
+    void sendPing(std::shared_ptr<COM> com);
 
     void attach(std::shared_ptr<IObserver> observer);
     void detach(std::shared_ptr<IObserver> observer);
@@ -32,7 +28,7 @@ public:
 
     std::vector<uint8_t> getNextPacket();
     std::string getMacAddress() const;
-
+    libnet_t* getLibnetHandle() {return lnet;}
 private:
     int tapFd;
     std::string tapName;
