@@ -1752,6 +1752,7 @@ executeCommand()
 
 DCE now has getNextPacket() and that used to be in RxObserver and I'm not sure how to move that or if it even has to be moved.
 
+<<<<<<< HEAD
 Anyway, we have to figure out a way for you to do the coding of all of this mixing together of how things are and how they should be between Cmd.cpp, Cmd.hpp, DCE.cpp, DCE.hpp, RxObserver and main().  If it easy for you to do, please just go ahead and do it otherwise let's consult with each other on how we can work together to facilitate this.
 
 //////////////////////
@@ -3083,4 +3084,6 @@ How's this for a plan?  I can clone the git repo and make a cmd executable and r
 ///////////////////
 
 
+=======
+>>>>>>> origin/main
 
