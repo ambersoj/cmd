@@ -1,4 +1,5 @@
 #include "Cmd.hpp"
+#include "COM.hpp"
 #include <iostream>
 #include <sstream>
 
@@ -28,16 +29,36 @@ std::vector<std::string> parseCommand(const std::string& input) {
     return args;
 }
 
-Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : dceList(coms) {
+void parseMacAddress(const std::string& macStr, std::array<uint8_t, 6>& dstMac) {
+    std::stringstream ss(macStr);
+    std::string byte;
+    int i = 0;
+
+    while (std::getline(ss, byte, ':')) {
+        if (i >= 6) {
+            throw std::runtime_error("Invalid MAC address format.");
+        }
+        dstMac[i++] = static_cast<uint8_t>(std::stoi(byte, nullptr, 16));
+    }
+
+    if (i != 6) {
+        throw std::runtime_error("Incomplete MAC address.");
+    }
+}
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
+
+    std::cout << "Cmd initialized with existing COM instances.\n";
+
     // Register built-in commands
     addCommand("send", [this](const std::vector<std::string>& args) {
-        if (args.size() < 8) {  // 6 bytes src MAC, 6 bytes dst MAC, at least 1-byte payload
+        if (args.size() < 4) {  // 6 bytes src MAC, 6 bytes dst MAC, at least 1-byte payload
             std::cerr << "Usage: send <dce_index> <dst_mac> <src_mac> <hex_data...>" << std::endl;
             return;
         }
 
         int dceIndex = std::stoi(args[0]);
-        if (dceIndex < 0 || dceIndex >= dceList.size()) {
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
             std::cerr << "Invalid DCE index." << std::endl;
             return;
         }
@@ -46,26 +67,24 @@ Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : dceList(coms) {
         std::array<uint8_t, 6> srcMac;
 
         // Parse destination MAC
-        for (int i = 0; i < 6; ++i) {
-            dstMac[i] = static_cast<uint8_t>(std::stoi(args[i + 1], nullptr, 16));
-        }
+        parseMacAddress(args[1], dstMac);
 
         // Parse source MAC
-        for (int i = 0; i < 6; ++i) {
-            srcMac[i] = static_cast<uint8_t>(std::stoi(args[i + 7], nullptr, 16));
-        }
+        parseMacAddress(args[1], srcMac);
 
-        // Parse payload (rest of the args)
         std::vector<uint8_t> payload;
-        for (size_t i = 13; i < args.size(); ++i) {
-            payload.push_back(static_cast<uint8_t>(std::stoi(args[i], nullptr, 16)));
+        std::stringstream ss(args[3]);
+        std::string byte;
+
+        while (std::getline(ss, byte, ':')) {
+            payload.push_back(static_cast<uint8_t>(std::stoi(byte, nullptr, 16)));
         }
 
         // Construct the EthernetFrame correctly
         EthernetFrame frame(srcMac, dstMac, payload);
 
         // Now call transmitFrame() with the correct type
-        dceList[dceIndex]->transmitFrame(frame);
+        comList[dceIndex]->transmitFrame(frame);
     });
 
     addCommand("recv", [this](const std::vector<std::string>& args) {
@@ -74,11 +93,11 @@ Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : dceList(coms) {
             return;
         }
         int dceIndex = std::stoi(args[0]);
-        if (dceIndex < 0 || dceIndex >= dceList.size()) {
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
             std::cerr << "Invalid DCE index." << std::endl;
             return;
         }
-        std::vector<uint8_t> packet = dceList[dceIndex]->getNextPacket();
+        std::vector<uint8_t> packet = comList[dceIndex]->getNextPacket();
         std::cout << "Received packet: ";
         for (uint8_t byte : packet) {
             printf("%02X ", byte);

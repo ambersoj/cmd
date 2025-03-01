@@ -1,16 +1,17 @@
 #include "COM.hpp"
-#include "RxObserver.hpp"
-#include "EthernetFrame.hpp"
-#include <pcap.h>
-#include <libnet.h>
 #include <iostream>
-#include <stdexcept>
 #include <algorithm>
-#include <sstream>
-#include <mutex>
+#include <string>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <net/if.h>
+#include <linux/if_tun.h>
 
-COM::COM(const std::string& tapName, const std::string& macAddress) 
-    : tapName(tapName), macAddress(macAddress) {
+// Constructor
+COM::COM(const std::string& tapName, const std::string& macAddress)
+    : tapName(tapName), macAddress(macAddress), tapFd(-1), lnet(nullptr), pcapHandle(nullptr) {
+
     if (!initializeTAP()) {
         throw std::runtime_error("Failed to initialize TAP device " + tapName);
     }
@@ -18,31 +19,62 @@ COM::COM(const std::string& tapName, const std::string& macAddress)
         throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
     }
     if (!initializePcap()) {
-        pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
-        if (!pcapHandle) {
-            throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
-        }
+        throw std::runtime_error("Failed to initialize pcap for " + tapName);
     }
+
     std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
 }
 
+// Initialize TAP device
 bool COM::initializeTAP() {
-    std::cout << "Creating TAP device " << tapName << "\n";
-    return !tapName.empty();
-}
-
-bool COM::initializeLibnet() {
-    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
-    if (!lnet) {
-        throw std::runtime_error("Failed to initialize libnet: " + std::string(libnet_geterror(lnet)));
+    tapFd = open("/dev/net/tun", O_RDWR);
+    if (tapFd < 0) {
+        std::cerr << "Failed to open /dev/net/tun\n";
+        return false;
     }
-    std::cout << "Initializing libnet for " << tapName << "\n";
+
+    struct ifreq ifr = {};
+    strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
+        std::cerr << "Failed to create TAP device " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to bring TAP device up: " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
     return true;
 }
 
+// Initialize libnet
+bool COM::initializeLibnet() {
+    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+    if (!lnet) {
+        std::cerr << "Libnet init failed for " << tapName << ": " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Libnet initialized for " << tapName << "\n";
+    return true;
+}
+
+// Initialize pcap
 bool COM::initializePcap() {
-    std::cout << "Initializing pcap for " << tapName << "\n";
-    return !tapName.empty();
+    pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+    if (!pcapHandle) {
+        std::cerr << "Failed to initialize pcap: " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Pcap initialized for " << tapName << "\n";
+    return true;
 }
 
 void COM::transmitFrame(const EthernetFrame& frame) {

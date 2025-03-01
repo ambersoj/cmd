@@ -2621,8 +2621,440 @@ root@PRED:/usr/local/cmd#
 
 /////////////////////////
 
+Oh no, guess what, I forgot about TAP initialization in Cmd::Cmd().  I found out quickly when I went to step through execution with the VSCode debugger.  I've got it something like this but it's wrong:
+
+COM::COM(const std::string& tapName, const std::string& macAddress) 
+    : tapName(tapName), macAddress(macAddress) {
+    if (!initializeTAP()) {
+        throw std::runtime_error("Failed to initialize TAP device " + tapName);
+    }
+    if (!initializeLibnet()) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+    if (!initializePcap()) {
+        pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+        if (!pcapHandle) {
+            throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
+        }
+    }
+    std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
+}
+
+std::string COM::initializeTAP() {
+    int tap_fd = open("/dev/net/tun", O_RDWR);
+    if (tap_fd < 0) {
+        throw std::runtime_error("Failed to open /dev/net/tun");
+    }
+
+    struct ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, tapName, IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tap_fd, TUNSETIFF, &ifr) < 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to create TAP device " + tapName);
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to bring TAP device up");
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return tapName;
+}
+
+bool COM::initializeLibnet() {
+    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+    if (!lnet) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(libnet_geterror(lnet)));
+    }
+    std::cout << "Initializing libnet for " << tapName << "\n";
+    return true;
+}
+
+bool COM::initializePcap() {
+    std::cout << "Initializing pcap for " << tapName << "\n";
+    return !tapName.empty();
+}
+
+The code I got for the screwed up initializeTAP() I got from the createTapDevice() that was above main() in the DCE days:
+
+std::string createTapDevice(const std::string& tapName) {
+    int tap_fd = open("/dev/net/tun", O_RDWR);
+    if (tap_fd < 0) {
+        throw std::runtime_error("Failed to open /dev/net/tun");
+    }
+
+    struct ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tap_fd, TUNSETIFF, &ifr) < 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to create TAP device " + tapName);
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to bring TAP device up");
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return tapName;
+}
+
+Of course the new type of initializeTAP returns a bool, which looks a bit slicker.
+
+While we're at it, can you create all six right now, instead of just the two.  Weren't we going to store the 6 mac addresses in #define macros?  Correct me if I'm wrong but can't we ignore the tap-to-mac table for now because at the low level we're dealing with a physical device sounding name is appropriate tap0, tap1, ... tap5.  Feel free to give them default mac addresses of your choice.
+
+///////////////////////////
+
+Just a couple more:
+
+src/Cmd.cpp: In constructor ‘Cmd::Cmd(std::vector<std::shared_ptr<COM> >&)’:
+src/Cmd.cpp:34:60: error: ‘MAC0’ was not declared in this scope
+   34 |         dceList.emplace_back(std::make_unique<COM>("tap0", MAC0));
+      |                                                            ^~~~
+src/Cmd.cpp:35:60: error: ‘MAC1’ was not declared in this scope
+   35 |         dceList.emplace_back(std::make_unique<COM>("tap1", MAC1));
+      |                                                            ^~~~
+src/Cmd.cpp:36:60: error: ‘MAC2’ was not declared in this scope
+   36 |         dceList.emplace_back(std::make_unique<COM>("tap2", MAC2));
+      |                                                            ^~~~
+src/Cmd.cpp:37:60: error: ‘MAC3’ was not declared in this scope
+   37 |         dceList.emplace_back(std::make_unique<COM>("tap3", MAC3));
+      |                                                            ^~~~
+src/Cmd.cpp:38:60: error: ‘MAC4’ was not declared in this scope
+   38 |         dceList.emplace_back(std::make_unique<COM>("tap4", MAC4));
+      |                                                            ^~~~
+src/Cmd.cpp:39:60: error: ‘MAC5’ was not declared in this scope
+   39 |         dceList.emplace_back(std::make_unique<COM>("tap5", MAC5));
+      |                                                            ^~~~
+src/COM.cpp: In constructor ‘COM::COM(const std::string&, const std::string&)’:
+src/COM.cpp:20:49: error: class ‘COM’ does not have any field named ‘tapFd’
+   20 |     : tapName(tapName), macAddress(macAddress), tapFd(-1), lnet(nullptr), pcapHandle(nullptr) {
+      |                                                 ^~~~~
+src/COM.cpp: In member function ‘bool COM::initializeTAP()’:
+src/COM.cpp:37:5: error: ‘tapFd’ was not declared in this scope
+   37 |     tapFd = open("/dev/net/tun", O_RDWR);
+      |     ^~~~~
+root@PRED:/usr/local/cmd# 
+
+I don't know wht to do about those tapFd errors.
+
+//////////////////////////////
+
+I'm naming MAC addresses in two places, main and COM.hpp it seems.  Main has this:
+
+int main() {
+    try {
+        // Initialize DCE instances
+        std::vector<std::shared_ptr<COM>> coms;
+        coms.push_back(std::make_shared<COM>("tap0", "00:11:22:33:44:00"));
+        coms.push_back(std::make_shared<COM>("tap1", "00:11:22:33:44:01"));
+        coms.push_back(std::make_shared<COM>("tap2", "00:11:22:33:44:02"));
+        coms.push_back(std::make_shared<COM>("tap3", "00:11:22:33:44:03"));
+        coms.push_back(std::make_shared<COM>("tap4", "00:11:22:33:44:04"));
+        coms.push_back(std::make_shared<COM>("tap5", "00:11:22:33:44:05"));
+
+        // Initialize command interface
+        Cmd cmd(coms);
+        
+        // Run the command loop
+        cmd.run();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+    
+    return 0;
+}
+
+and COM.hpp has this:
+
+constexpr std::array<const char*, 6> MAC_ADDRESSES = {
+    "00:11:22:33:44:00", "00:11:22:33:44:01", "00:11:22:33:44:02",
+    "00:11:22:33:44:03", "00:11:22:33:44:04", "00:11:22:33:44:05"
+};
+
+and Cmd.cpp has this:
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : dceList(coms) {
+
+    try {
+
+        for (int i = 0; i < 6; ++i) {
+            dceList.emplace_back(std::make_unique<COM>("tap" + std::to_string(i), MAC_ADDRESSES[i]));
+        }
+
+        std::cout << "All TAP devices initialized successfully.\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Error initializing TAPs: " << e.what() << "\n";
+        throw;  // Fail early if TAP setup is broken
+    }
+
+So somewhere things are getting mixed up and I hope you can quickly fix, which I have confidence in.  Incidentally we should change dceList to comList either now or later some time.
+
+Here's terminal output, which looks very nice until I hit the Cmd constructor in main():
+
+Created TAP device: tap0
+Libnet initialized for tap0
+Pcap initialized for tap0
+COM initialized for tap0 with MAC 00:11:22:33:44:00
+Created TAP device: tap1
+Libnet initialized for tap1
+Pcap initialized for tap1
+COM initialized for tap1 with MAC 00:11:22:33:44:01
+Created TAP device: tap2
+Libnet initialized for tap2
+Pcap initialized for tap2
+COM initialized for tap2 with MAC 00:11:22:33:44:02
+Created TAP device: tap3
+Libnet initialized for tap3
+Pcap initialized for tap3
+COM initialized for tap3 with MAC 00:11:22:33:44:03
+Created TAP device: tap4
+Libnet initialized for tap4
+Pcap initialized for tap4
+COM initialized for tap4 with MAC 00:11:22:33:44:04
+Created TAP device: tap5
+Libnet initialized for tap5
+Pcap initialized for tap5
+COM initialized for tap5 with MAC 00:11:22:33:44:05
+
+It crashed in the Cmd constructor the very first time it tries doing this:
+
+        for (int i = 0; i < 6; ++i) {
+            dceList.emplace_back(std::make_unique<COM>("tap" + std::to_string(i), MAC_ADDRESSES[i]));
+        }
+
+All the taps vanish from wireshark and the program crashes out.
+
+I have the MAC_ADDRESSES in COM.hpp:
+
+constexpr std::array<const char*, 6> MAC_ADDRESSES = {
+    "00:11:22:33:44:00", "00:11:22:33:44:01", "00:11:22:33:44:02",
+    "00:11:22:33:44:03", "00:11:22:33:44:04", "00:11:22:33:44:05"
+};
+
+It looks like it's trying to reinitialize everything because the line above causes this in the program output:
+
+Failed to create TAP device tap0
+Error initializing TAPs: Failed to initialize TAP device tap0
+Error: Failed to initialize TAP device tap0
+[1] + Done                       "/usr/bin/gdb" --interpreter=mi --tty=${DbgTerm} 0<"/tmp/Microsoft-MIEngine-In-a2wdhtpr.cdf" 1>"/tmp/Microsoft-MIEngine-Out-tsmllr22.tl0"
+root@PRED:/usr/local/cmd# 
+
+///////////////////////////////////
+
+Well I'm stepping through program execution and trying to do a send command.  I've tried the following:
+
+>send 0 00:11:22:33:44:02 00:11:22:33:44:01 "Hello tap1, from tap0!!!"
+
+>send 0 0x00:0x11:0x22:0x33:0x44:0x02 0x00:0x11:0x22:0x33:0x44:0x01 0x48:0x65:0x6c:0x6c:0x6f:0x20:0x74:0x61:0x70:0x31:0x2c:0x20:0x66:0x72:0x6f:0x6d:0x20:0x74:0x61:0x70:0x30:0x21:0x21:0x21
+
+>send 0 00:11:22:33:44:02 00:11:22:33:44:01 48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21
+
+It crashes out and kills all the taps in about the third iteration of this for loop.
 
 
+
+        for (int i = 0; i < 6; ++i) {
+            dstMac[i] = static_cast<uint8_t>(std::stoi(args[i + 1], nullptr, 16));
+        }
+
+//////////////////////////////////
+
+Before your helper function and just the information from you about the format it expects the input line:
+
+With this input:
+send "00" "00", "11", "22", "33", "44", "02" "00", "11", "22", "33", "44", "01" "48", "65", "6c", "6c", "6f", "20", "74", "61", "70", "31", "2c", "20", "66", "72", "6f", "6d", "20", "74", "61", "70", "30", "21", "21", "21"
+
+
+These were the args at parse dst mac and notice that the arg[0] still has the dce index:
+
+arg[0] = "00\" \"00\", \"11\", \"22\", \"33\", \"44\", \"02"
+
+arg[1] = 00\", \"11\", \"22\", \"33\", \"44\", \"01"
+
+arg[2] = "48\", \"65\", \"6c\", \"6c\", \"6f\", \"20\", \"74\", \"61\", \"70\", \"31\", \"2c\", \"20\", \"66\", \"72\", \"6f\", \"6d\", \"20\", \"74\", \"61\", \"70\", \"30\", \"21\", \"21\", \"21"
+
+So I put in the lovely new parseMacAddress() and now I get this error:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Cmd.cpp: In lambda function:
+src/Cmd.cpp:70:34: error: cannot convert ‘std::array<unsigned char, 6>’ to ‘uint8_t*’ {aka ‘unsigned char*’}
+   70 |         parseMacAddress(args[1], dstMac);
+      |                                  ^~~~~~
+      |                                  |
+      |                                  std::array<unsigned char, 6>
+src/Cmd.cpp:32:58: note:   initializing argument 2 of ‘void parseMacAddress(const std::string&, uint8_t*)’
+   32 | void parseMacAddress(const std::string& macStr, uint8_t* dstMac) {
+      |                                                 ~~~~~~~~~^~~~~~
+
+Here's my Cmd.cpp:
+
+include "Cmd.hpp"
+#include "COM.hpp"
+#include <iostream>
+#include <sstream>
+
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (std::getline(iss, token, ' ')) {
+        if (!token.empty()) {
+            if (token.front() == '"' && !inQuotes) {
+                inQuotes = true;
+                quotedString = token.substr(1);
+            } else if (token.back() == '"' && inQuotes) {
+                inQuotes = false;
+                quotedString += " " + token.substr(0, token.length() - 1);
+                args.push_back(quotedString);
+            } else if (inQuotes) {
+                quotedString += " " + token;
+            } else {
+                args.push_back(token);
+            }
+        }
+    }
+    return args;
+}
+
+void parseMacAddress(const std::string& macStr, uint8_t* dstMac) {
+    std::stringstream ss(macStr);
+    std::string byte;
+    int i = 0;
+
+    while (std::getline(ss, byte, ':')) {
+        if (i >= 6) {
+            throw std::runtime_error("Invalid MAC address format.");
+        }
+        dstMac[i++] = static_cast<uint8_t>(std::stoi(byte, nullptr, 16));
+    }
+
+    if (i != 6) {
+        throw std::runtime_error("Incomplete MAC address.");
+    }
+}
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
+
+    std::cout << "Cmd initialized with existing COM instances.\n";
+
+    // Register built-in commands
+    addCommand("send", [this](const std::vector<std::string>& args) {
+        if (args.size() < 4) {  // 6 bytes src MAC, 6 bytes dst MAC, at least 1-byte payload
+            std::cerr << "Usage: send <dce_index> <dst_mac> <src_mac> <hex_data...>" << std::endl;
+            return;
+        }
+
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+
+        std::array<uint8_t, 6> dstMac;
+        std::array<uint8_t, 6> srcMac;
+
+        // Parse destination MAC
+        parseMacAddress(args[1], dstMac);
+
+        // Parse source MAC
+        for (int i = 0; i < 6; ++i) {
+            srcMac[i] = static_cast<uint8_t>(std::stoi(args[i + 7], nullptr, 16));
+        }
+
+        // Parse payload (rest of the args)
+        std::vector<uint8_t> payload;
+        for (size_t i = 13; i < args.size(); ++i) {
+            payload.push_back(static_cast<uint8_t>(std::stoi(args[i], nullptr, 16)));
+        }
+
+        // Construct the EthernetFrame correctly
+        EthernetFrame frame(srcMac, dstMac, payload);
+
+        // Now call transmitFrame() with the correct type
+        comList[dceIndex]->transmitFrame(frame);
+    });
+
+    addCommand("recv", [this](const std::vector<std::string>& args) {
+        if (args.empty()) {
+            std::cerr << "Usage: recv <dce_index>" << std::endl;
+            return;
+        }
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+        std::vector<uint8_t> packet = comList[dceIndex]->getNextPacket();
+        std::cout << "Received packet: ";
+        for (uint8_t byte : packet) {
+            printf("%02X ", byte);
+        }
+        std::cout << std::endl;
+    });
+}
+
+void Cmd::addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func) {
+    commands.emplace(name, Command(name, func));
+}
+
+void Cmd::executeCommand(const std::string& input) {
+    std::vector<std::string> args = parseCommand(input);
+
+    if (args.empty()) {
+        std::cerr << "Error: Empty command string" << std::endl;
+        return;
+    }
+
+    std::string commandName = args[0];  // First argument is the command name
+    auto it = commands.find(commandName);
+    if (it != commands.end()) {
+        args.erase(args.begin());  // Remove command name from args before passing
+        it->second.execute(args);
+    } else {
+        std::cerr << "Command not found: " << commandName << std::endl;
+    }
+}
+
+void Cmd::run() {
+    std::cout << "Cmd loop running... Type 'exit' to quit." << std::endl;
+    std::string input;
+    while (true) {
+        std::cout << "> ";
+        std::getline(std::cin, input);
+        if (input == "exit") break;
+        executeCommand(input);
+    }
+}
+
+///////////////////////////
+
+It's looking really good.  I'm putting in this for input:
+
+send 0 00:11:22:33:44:02 00:11:22:33:44:01 48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21
+
+and the two macs and the type(ipv4 = 0x0800) is captured by wireshark.  But this code:
+
+        for (size_t i = 13; i < args.size(); ++i) {
+            payload.push_back(static_cast<uint8_t>(std::stoi(args[i], nullptr, 16)));
+        }
+
+skips over the payload handling.  What it wants for data to transmit which is:
+
+arg[3] = "48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21"
 
 
 

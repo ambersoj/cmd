@@ -12,6 +12,11 @@
 #include <mutex>
 #include <thread>
 
+constexpr std::array<const char*, 6> MAC_ADDRESSES = {
+    "00:11:22:33:44:00", "00:11:22:33:44:01", "00:11:22:33:44:02",
+    "00:11:22:33:44:03", "00:11:22:33:44:04", "00:11:22:33:44:05"
+};
+
 class COM {
 public:
     COM(const std::string& tapName, const std::string& macAddress);
@@ -29,6 +34,7 @@ public:
     std::string getMacAddress() const;
 
 private:
+    int tapFd;
     std::string tapName;
     std::string macAddress;
     pcap_t* pcapHandle;
