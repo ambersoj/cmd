@@ -101,11 +101,11 @@ void COM::transmitFrame(const EthernetFrame& frame) {
 void COM::sendPing(std::shared_ptr<COM> com) {
     libnet_t* lnet = com->getLibnetHandle();  // Get libnet handle from COM
 
-    std::array<uint8_t, 6> srcMac = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
-    std::array<uint8_t, 6> dstMac = {0x02, 0x00, 0x00, 0x00, 0x01, 0x01};
+    uint8_t dstMac[6] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x01};
+    uint8_t srcMac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
 
-    uint32_t srcIP = libnet_name2addr4(lnet, (char*)"192.168.100.1", LIBNET_DONT_RESOLVE);
-    uint32_t dstIP = libnet_name2addr4(lnet, (char*)"192.168.100.2", LIBNET_DONT_RESOLVE);
+    uint32_t srcIP = libnet_name2addr4(lnet, (char*)"192.168.200.1", LIBNET_DONT_RESOLVE);
+    uint32_t dstIP = libnet_name2addr4(lnet, (char*)"192.168.200.2", LIBNET_DONT_RESOLVE);
 
     libnet_clear_packet(lnet);
 
@@ -125,28 +125,32 @@ void COM::sendPing(std::shared_ptr<COM> com) {
     // 🏗 Build IP Header
     libnet_ptag_t ipTag = libnet_build_ipv4(
         LIBNET_IPV4_H + LIBNET_ICMPV4_ECHO_H + payloadSize, 
-        0, 12345, 0, 64, IPPROTO_ICMP, 0, srcIP, dstIP,
+        0, 0, 0, 64, IPPROTO_ICMP, 0, srcIP, dstIP,
         NULL, 0, lnet, 0
     );
     if (ipTag == -1) {
         throw std::runtime_error("IP build error: " + std::string(libnet_geterror(lnet)));
     }
 
-    // 🔥 Get raw packet data
-    uint8_t* packetData = nullptr;
-    uint32_t packetSize = 0;
-    packetData = libnet_getpbuf(lnet, packetSize);
-    if (!packetData) {
-        throw std::runtime_error("Failed to get packet buffer: " + std::string(libnet_geterror(lnet)));
+    // Construct Ethernet Frame
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        dstMac, srcMac,
+        ETHERTYPE_IP, NULL, 0,
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        std::cerr << "Error building Ethernet packet: " << libnet_geterror(lnet) << std::endl;
+        return;
     }
 
-    // 🏗 Wrap into EthernetFrame
-    std::vector<uint8_t> ethPayload(packetData, packetData + packetSize);
-    EthernetFrame frame(srcMac, dstMac, ethPayload);
+    // Send packet
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send ICMP Ping: " + std::string(libnet_geterror(lnet)));
+    }
 
-    // 🚀 Transmit!
-    com->transmitFrame(frame);
-    std::cout << "ICMP Ping sent!" << std::endl;
+    std::cout << "ICMP Ping sent! (" << bytesWritten << " bytes)" << std::endl;
 }
 
 void COM::attach(std::shared_ptr<IObserver> observer) {

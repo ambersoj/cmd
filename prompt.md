@@ -3381,6 +3381,154 @@ or
  
 ////////////////////////
 
+It's crashing out and I'm wondering if I have a few things wrong.
+
+Like how I get lnet handle:
+
+This is in COM.hpp:
+    libnet_t* getLibnetHandle() {return lnet;}
+
+This is in COM.cpp:
+    void COM::sendPing(std::shared_ptr<COM> com) {
+        libnet_t* lnet = com->getLibnetHandle();  // Get libnet handle from COM
+
+Interestingly it seems to crash after this line if I mismatch the MAC address.  I'm not sure about that though.  But it's good news if true.
+
+
+If the mac is the usual one I use (src = cmd0 dst = hud0) then it throws this exception:
+
+    // 🔥 Get raw packet data
+    uint8_t* packetData = nullptr;
+    uint32_t packetSize = 0;
+    packetData = libnet_getpbuf(lnet, packetSize);
+    if (!packetData) {
+        throw std::runtime_error("Failed to get packet buffer: " + std::string(libnet_geterror(lnet)));
+    }
+
+What are these lines for anyway?
+
+BTW, we'll have to check to make sure that the program takes these taps down and also deletes them on exit, but that's not the focus right now, could be important though.  Sometime we'll get around to it.  I thought I'd mention it before I forgot.
+
+////////////////////////
+
+Hey is this a normal value for lnet:
+
+lnet = 0x5555555890c0
+
+It's crashing now on libnet write, returning bytes written as -1.
+
+Maybe it's crashing because of a mac confilct 
+
+503: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 36:9b:e5:b4:f0:01 brd ff:ff:ff:ff:ff:ff
+
+Should be: 02 00 00 00 00 01
+
+478: hud0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 8a:41:a6:22:ad:c4 brd ff:ff:ff:ff:ff:ff
+
+Should be: 02 00 00 00 01 01
+
+Bridge is in place:
+
+root@PRED:/usr/local/cmd# brctl show br1
+bridge name     bridge id               STP enabled     interfaces
+br1             8000.829e3c35fd65       no              cmd0
+                                                        hud0
+
+What about enabling STP?  I know how to do it and saw some sort of interesting stuff - but I don't understand it at all.
+
+You showed me yesterday how to get my user-defined mac addresses put into these taps.  But today I don't know how, again - I should have documented it.
+
+What are you thought's on this crashing?
+
+////////////////////////////
+
+Cmd loop running... Type 'exit' to quit.
+> send 0 02:00:00:00:01:01 02:00:00:00:00:01 48:65:6C:6C:6F:20:68:75:64:30:20:66:72:6F:6D:20:63:6D:64:30:20:21:21:21
+terminate called without an active exception
+
+But it doesn't print:
+
+"Failed to send ICMP Ping: "
+
+like it should according to:
+
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send ICMP Ping: " + std::string(libnet_geterror(lnet)));
+    }
+
+Here's the bridge:
+port no mac addr                is local?       ageing timer
+  2     02:00:00:00:00:01       yes                0.00
+  2     02:00:00:00:00:01       yes                0.00
+  1     02:00:00:00:01:01       yes                0.00
+  1     02:00:00:00:01:01       yes                0.00
+
+Here's the bridge itself:
+
+502: br1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 82:9e:3c:35:fd:65 brd ff:ff:ff:ff:ff:ff
+
+I wonder if I should try to set the bridge to something like:
+
+02 00 00 00 02 01
+
+Here are all the taps and the bridge too:
+
+521: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+522: cmd1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 52:7c:7e:b0:57:68 brd ff:ff:ff:ff:ff:ff
+523: cmd2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether e6:71:9a:ec:71:dd brd ff:ff:ff:ff:ff:ff
+524: cmd3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 7e:68:0d:6a:bc:56 brd ff:ff:ff:ff:ff:ff
+525: cmd4: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 36:58:80:ed:96:1b brd ff:ff:ff:ff:ff:ff
+526: cmd5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 2a:33:da:47:d7:14 brd ff:ff:ff:ff:ff:ff
+478: hud0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:01:01 brd ff:ff:ff:ff:ff:ff
+479: hud1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 66:16:9a:5e:40:d6 brd ff:ff:ff:ff:ff:ff
+480: hud2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether ae:01:ed:bc:4a:ca brd ff:ff:ff:ff:ff:ff
+481: hud3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 86:3c:42:90:35:25 brd ff:ff:ff:ff:ff:ff
+482: hud4: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether be:4b:f4:2b:89:53 brd ff:ff:ff:ff:ff:ff
+483: hud5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether fa:43:1d:bb:c9:1c brd ff:ff:ff:ff:ff:ff
+502: br1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 82:9e:3c:35:fd:65 brd ff:ff:ff:ff:ff:ff
+root@PRED:/usr/local/cmd# 
+
+I tried sending to the bridge:
+
+send 0 02:00:00:00:02:01 02:00:00:00:00:01 48:65:6C:6C:6F:20:68:75:64:30:20:66:72:6F:6D:20:63:6D:64:30:20:21:21:21
+
+after renaming the bridge to 02 00 00 00 02 01
+
+527: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+
+478: hud0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br1 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:01:01 brd ff:ff:ff:ff:ff:ff
+
+502: br1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:02:01 brd ff:ff:ff:ff:ff:ff
+
+but it still crashes with bytes written -1.
+
+////////////////////////////////
+
+I have an idea.  There's a laptop that's hooked with this desktop I'm working on with and I'm pretty familiar with running libnet between these two machines in layer 2 and I even have a little packet generator program I can use.  Then I can skirt this whole virtualization thing for a while and at least see if I can blast packets out the NIC.
+
+I'll just make dev in libnet = eno1 and bingo bango.  Anyway, I'm writing this on the fly and right now, though, I'm going to finish going through your suggestions.
+
+
 
 
 

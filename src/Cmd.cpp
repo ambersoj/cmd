@@ -86,7 +86,7 @@ Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
 
         // Now call transmitFrame() with the correct type
 //        comList[dceIndex]->transmitFrame(frame);
-        comList[dceIndex]->sendPing(comList[0]);
+        comList[dceIndex]->sendPing(comList[dceIndex]);
         
     });
 
