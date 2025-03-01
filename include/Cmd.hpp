@@ -2,15 +2,24 @@
 #define CMD_HPP
 
 #include "Command.hpp"
+#include "COM.hpp"
 #include <unordered_map>
+#include <vector>
+#include <memory>
+#include <functional>
 #include <string>
 
 class Cmd {
 public:
-    void addCommand(const std::string& name, Command::CommandFunction func);
-    void executeCommand(const std::string& name) const;
+    explicit Cmd(std::vector<std::shared_ptr<COM>>& coms);
+    void addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func);
+    void run();
+    void executeCommand(const std::string& input);
+
 
 private:
     std::unordered_map<std::string, Command> commands;
+    std::vector<std::shared_ptr<COM>> comList;
 };
-#endif
+
+#endif // CMD_HPP

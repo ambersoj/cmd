@@ -12,7 +12,7 @@
                 "${workspaceFolder}/src/Command.cpp",
                 "${workspaceFolder}/src/EthernetFrame.cpp",
                 "${workspaceFolder}/src/RxObserver.cpp",
-                "${workspaceFolder}/src/DCE.cpp",
+                "${workspaceFolder}/src/COM.cpp",
                 "-o",
                 "${workspaceFolder}/cmd",
                 "-I${workspaceFolder}/include",

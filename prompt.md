@@ -1752,4 +1752,1338 @@ executeCommand()
 
 DCE now has getNextPacket() and that used to be in RxObserver and I'm not sure how to move that or if it even has to be moved.
 
+<<<<<<< HEAD
+Anyway, we have to figure out a way for you to do the coding of all of this mixing together of how things are and how they should be between Cmd.cpp, Cmd.hpp, DCE.cpp, DCE.hpp, RxObserver and main().  If it easy for you to do, please just go ahead and do it otherwise let's consult with each other on how we can work together to facilitate this.
+
+//////////////////////
+
+These are the errors:
+
+include/Command.hpp:12:5: note: candidate: ‘Command::Command(std::string, CommandFunction)’
+   12 |     Command(std::string name, CommandFunction func);
+      |     ^~~~~~~
+include/Command.hpp:12:5: note:   candidate expects 2 arguments, 0 provided
+include/Command.hpp:8:7: note: candidate: ‘Command::Command(const Command&)’
+    8 | class Command {
+      |       ^~~~~~~
+include/Command.hpp:8:7: note:   candidate expects 1 argument, 0 provided
+include/Command.hpp:8:7: note: candidate: ‘Command::Command(Command&&)’
+include/Command.hpp:8:7: note:   candidate expects 1 argument, 0 provided
+In file included from src/DCE.cpp:1:
+include/DCE.hpp:27:10: error: extra qualification ‘DCE::’ on member ‘initializeTAP’ [-fpermissive]
+   27 |     bool DCE::initializeTAP();
+      |          ^~~
+include/DCE.hpp:28:10: error: extra qualification ‘DCE::’ on member ‘initializeLibnet’ [-fpermissive]
+   28 |     bool DCE::initializeLibnet();
+      |          ^~~
+include/DCE.hpp:29:10: error: extra qualification ‘DCE::’ on member ‘initializePcap’ [-fpermissive]
+   29 |     bool DCE::initializePcap();
+      |          ^~~
+include/DCE.hpp:35:5: error: extra qualification ‘DCE::’ on member ‘DCE’ [-fpermissive]
+   35 |     DCE::DCE(const std::string& tapName, const std::string& macAddress);
+      |     ^~~
+include/DCE.hpp:37:17: error: extra qualification ‘DCE::’ on member ‘getNextPacket’ [-fpermissive]
+   37 |     std::string DCE::getNextPacket();
+      |                 ^~~
+include/DCE.hpp:45:17: error: extra qualification ‘DCE::’ on member ‘getMacAddress’ [-fpermissive]
+   45 |     std::string DCE::getMacAddress() const;
+      |                 ^~~
+src/DCE.cpp: In constructor ‘DCE::DCE(const std::string&, const std::string&)’:
+src/DCE.cpp:5:89: error: class ‘DCE’ does not have any field named ‘macAddress’
+    5 | DCE::DCE(const std::string& tapName, const std::string& macAddress) : tapName(tapName), macAddress(macAddress) {
+      |                                                                                         ^~~~~~~~~~
+src/DCE.cpp: In member function ‘std::string DCE::getMacAddress() const’:
+src/DCE.cpp:103:12: error: ‘macAddress’ was not declared in this scope; did you mean ‘getMacAddress’?
+  103 |     return macAddress;
+      |            ^~~~~~~~~~
+      |            getMacAddress
+
+/////////////////////////////
+
+Here's main():
+
+#include "DCE.hpp"
+#include "Command.hpp"
+#include "Cmd.hpp"
+#include <iostream>
+#include <stdexcept>
+#include <cstring>
+#include <fcntl.h>
+#include <linux/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <cstdlib>
+#include <memory>
+#include "RxObserver.hpp"
+#include <pcap.h>
+#include <libnet.h>
+#include "EthernetFrame.hpp"
+
+// Function to create a TAP device
+std::string createTapDevice(const std::string& tapName) {
+    int tap_fd = open("/dev/net/tun", O_RDWR);
+    if (tap_fd < 0) {
+        throw std::runtime_error("Failed to open /dev/net/tun");
+    }
+
+    struct ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tap_fd, TUNSETIFF, &ifr) < 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to create TAP device " + tapName);
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to bring TAP device up");
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return tapName;
+}
+
+int main() {
+    try {
+        std::string tap0 = createTapDevice("tap0");
+        std::string tap1 = createTapDevice("tap1");
+
+        // Initialize libnet
+        char errbuf[LIBNET_ERRBUF_SIZE];
+        libnet_t *lnet0 = libnet_init(LIBNET_LINK, tap0.c_str(), errbuf);
+        libnet_t *lnet1 = libnet_init(LIBNET_LINK, tap1.c_str(), errbuf);
+        if (!lnet0 || !lnet1) {
+            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+        }
+
+        // Create DCE instances for each TAP device
+        auto dce0 = std::make_shared<DCE>(tap0);
+        auto dce1 = std::make_shared<DCE>(tap1);
+
+        // Create Observers for each DCE instance
+        auto observer0 = std::make_shared<RxObserver>();
+        auto observer1 = std::make_shared<RxObserver>();
+
+        // Attach Observers
+        dce0->attach(observer0);
+        dce1->attach(observer1);
+
+        // Start packet capture
+        dce0->startCapture();
+        dce1->startCapture();
+
+        // Command execution setup
+        Cmd commandProcessor;
+        commandProcessor.addCommand("dce_transmit", [&dce0](const std::vector<std::string>& args) {
+            if (args.size() < 3) {
+                std::cerr << "Error: Insufficient arguments for transmission. Usage: dce_transmit <srcMac> <dstMac> <data>" << std::endl;
+                return;
+            }
+            
+            std::array<uint8_t, 6> srcMac;
+            std::array<uint8_t, 6> dstMac;
+            std::vector<uint8_t> payload(args[2].begin(), args[2].end());
+            
+            // Convert MAC addresses from string to byte array
+            sscanf(args[0].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &srcMac[0], &srcMac[1], &srcMac[2], &srcMac[3], &srcMac[4], &srcMac[5]);
+            sscanf(args[1].c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &dstMac[0], &dstMac[1], &dstMac[2], &dstMac[3], &dstMac[4], &dstMac[5]);
+            
+            EthernetFrame frame(srcMac, dstMac, payload);
+            dce0->transmitFrame(frame);
+            std::cout << "Transmitted data: " << args[2] << std::endl;
+        });
+
+        std::cout << "DCE is running.\nEnter command: " << std::endl;
+        std::string input;
+        while (std::getline(std::cin, input)) {
+            if(input == "exit")
+            {
+                break;
+            }
+            commandProcessor.executeCommand(input);
+            std::cout << "Enter command: " << std::endl;
+        }
+
+        // Stop packet capture
+        dce0->stopCapture();
+        dce1->stopCapture();
+
+        // Cleanup libnet
+        libnet_destroy(lnet0);
+        libnet_destroy(lnet1);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+Fix these:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/DCE.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/main.cpp: In function ‘int main()’:
+src/main.cpp:68:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘attach’
+   68 |         dce0->attach(observer0);
+      |               ^~~~~~
+src/main.cpp:69:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘attach’
+   69 |         dce1->attach(observer1);
+      |               ^~~~~~
+src/main.cpp:72:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘startCapture’
+   72 |         dce0->startCapture();
+      |               ^~~~~~~~~~~~
+src/main.cpp:73:15: error: ‘using std::__shared_ptr_access<DCE, __gnu_cxx::_S_atomic, false, false>::element_type = class DCE’ {aka ‘class DCE’} has no member named ‘startCapture’
+   73 |         dce1->startCapture();
+      |               ^~~~~~~~~~~~
+src/main.cpp:76:13: error: no matching function for call to ‘Cmd::Cmd()’
+   76 |         Cmd commandProcessor;
+      |             ^~~~~~~~~~~~~~~~
+In file included from src/main.cpp:3:
+
+/////////////////////////
+
+Fix these:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/DCE.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Cmd.cpp: In constructor ‘Cmd::Cmd(std::vector<std::shared_ptr<DCE> >&)’:
+src/Cmd.cpp:5:53: error: class ‘Cmd’ does not have any field named ‘dceList’
+    5 | Cmd::Cmd(std::vector<std::shared_ptr<DCE>>& dces) : dceList(dces) {
+      |                                                     ^~~~~~~
+src/Cmd.cpp: In member function ‘void Cmd::addCommand(const std::string&, std::function<void(const std::vector<std::__cxx11::basic_string<char> >&)>)’:
+src/Cmd.cpp:11:22: error: no match for ‘operator=’ (operand types are ‘std::unordered_map<std::__cxx11::basic_string<char>, Command>::mapped_type’ {aka ‘Command’} and ‘std::function<void(const std::vector<std::__cxx11::basic_string<char> >&)>’)
+   11 |     commands[name] = func;
+      |                      ^~~~
+In file included from include/Cmd.hpp:4,
+                 from src/Cmd.cpp:1:
+
+With your knowlege of the other files in the cmd project fix main() and whatever else in the cmd code base that you're aware of to fix the compiler errors.
+ 
+//////////////////////
+
+Ok partner, we're almost there.  Fix these:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/DCE.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Command.cpp:4:36: error: ‘CommandFunction’ has not been declared
+    4 | Command::Command(std::string name, CommandFunction func)
+      |                                    ^~~~~~~~~~~~~~~
+src/Command.cpp:4:1: error: no declaration matches ‘Command::Command(std::string, int)’
+    4 | Command::Command(std::string name, CommandFunction func)
+      | ^~~~~~~
+In file included from src/Command.cpp:1:
+include/Command.hpp:8:7: note: candidates are: ‘Command::Command(Command&&)’
+    8 | class Command {
+      |       ^~~~~~~
+include/Command.hpp:8:7: note:                 ‘Command::Command(const Command&)’
+include/Command.hpp:10:5: note:                 ‘Command::Command(const std::string&, std::function<void(const std::vector<std::__cxx11::basic_string<char> >&)>)’
+   10 |     Command(const std::string& name, std::function<void(const std::vector<std::string>&)> func)
+      |     ^~~~~~~
+include/Command.hpp:8:7: note: ‘class Command’ defined here
+    8 | class Command {
+      |       ^~~~~~~
+src/Command.cpp:11:6: error: redefinition of ‘void Command::execute(const std::vector<std::__cxx11::basic_string<char> >&) const’
+   11 | void Command::execute(const std::vector<std::string>& args) const {
+      |      ^~~~~~~
+include/Command.hpp:13:10: note: ‘void Command::execute(const std::vector<std::__cxx11::basic_string<char> >&) const’ previously defined here
+   13 |     void execute(const std::vector<std::string>& args) const {
+      |          ^~~~~~~
+src/Command.cpp:15:19: error: no declaration matches ‘const std::string Command::getName() const’
+   15 | const std::string Command::getName() const {
+      |                   ^~~~~~~
+src/Command.cpp:15:19: note: no functions named ‘const std::string Command::getName() const’
+include/Command.hpp:8:7: note: ‘class Command’ defined here
+    8 | class Command {
+      |       ^~~~~~~
+
+
+With your knowlege of the other files in the cmd project fix main() and whatever else in the cmd code base that you're aware of to fix the compiler errors.
+
+////////////////////
+
+Hey nice job on refactoring into the neater and more compact form.  The main() is a lot nicer and responsibilities are satisfyingly appropriate.  There's something really satisgying about how you separated COM (btw way I've changed DCE to COM, and dces to coms and DCE.cpp top COM.cpp and DCE.hpp to COm.hpp) and Cmd and how Cmd has it's good ol' parseCommand() back - you and I worked too hard on the nice little helper function parsesCommand() to just brush it aside in a refactoring and I'm glad you put it back in place.
+
+I'm having a bit of trouble presently with COM::transmitFrame() because it's like this in COM:
+
+void transmitFrame(const std::string &dstMac, const std::string &data);
+
+and it's like this in DCE:
+
+void DCE::transmitFrame(const EthernetFrame& frame) {
+
+Would you be able to resolve this in a comprehensive non-breaking way?  Buy non-breaking I mean taking into account all of cmd, not just COM or not just what's immediate and close.
+
+I think these from DCE:
+
+    void attach(std::shared_ptr<IObserver> observer) override;
+    void detach(std::shared_ptr<IObserver> observer) override;
+    void notify(const std::vector<uint8_t>& packet) override;
+    void startCapture();
+    void stopCapture();
+
+need moved to COM, right?  Can you do that too?
+
+// DCE.cpp
+#include "DCE.hpp"
+#include <algorithm>
+#include <iostream>
+
+DCE::DCE(const std::string& tap) : tapName(tap), capturing(false), running(false) {
+    pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+    if (!pcapHandle) {
+        throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
+    }
+
+    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+    if (!lnet) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+}
+
+DCE::~DCE() {
+    stopCapture();
+    if (pcapHandle) {
+        pcap_close(pcapHandle);
+    }
+    if (lnet) {
+        libnet_destroy(lnet);
+    }
+}
+
+void DCE::packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
+    auto dce = reinterpret_cast<DCE*>(userData);
+    std::vector<uint8_t> packetData(packet, packet + pkthdr->caplen);
+    dce->notify(packetData);
+}
+
+void DCE::attach(std::shared_ptr<IObserver> observer) {
+    observers.push_back(observer);
+}
+
+void DCE::detach(std::shared_ptr<IObserver> observer) {
+    observers.erase(std::remove(observers.begin(), observers.end(), observer), observers.end());
+}
+
+void DCE::notify(const std::vector<uint8_t>& packet) {
+    for (auto& observer : observers) {
+        observer->update(packet);
+    }
+}
+
+void DCE::startCapture() {
+    running = true;
+    captureThread = std::thread([this]() {
+        pcap_loop(pcapHandle, 0, packetHandler, reinterpret_cast<u_char*>(this));
+    });
+}
+
+void DCE::stopCapture() {
+    running = false;
+    pcap_breakloop(pcapHandle);
+    if (captureThread.joinable()) {
+        captureThread.join();
+    }
+}
+
+void DCE::transmitFrame(const EthernetFrame& frame) {
+    libnet_clear_packet(lnet);  // Ensure a clean buffer before writing
+    
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+}
+
+// COM.cpp
+#include "COM.hpp"
+#include "EthernetFrame.hpp"
+#include <pcap.h>
+#include <libnet.h>
+#include <iostream>
+#include <stdexcept>
+#include <cstring>
+#include <sstream>
+#include <memory.h>
+
+COM::COM(const std::string& tapName, const std::string& macAddress) : tapName(tapName), macAddress(macAddress) {
+    if (!initializeTAP()) {
+        throw std::runtime_error("Failed to initialize TAP device " + tapName);
+    }
+    if (!initializeLibnet()) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+    if (!initializePcap()) {
+        pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+        if (!pcapHandle) {
+            throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
+        }
+    }
+    std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
+}
+
+bool COM::initializeTAP() {
+    std::cout << "Creating TAP device " << tapName << "\n";
+    // Simulate a failure case for debugging
+    if (tapName.empty()) return false;
+    return true;
+}
+
+bool COM::initializeLibnet() {
+        lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+        if (!lnet) {
+            throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+        }
+        std::cout << "Initializing libnet for " << tapName << "\n";
+    return !tapName.empty(); // Return false if tapName is invalid
+}
+
+bool COM::initializePcap() {
+    std::cout << "Initializing pcap for " << tapName << "\n";
+    return !tapName.empty(); // Return false if tapName is invalid
+}
+
+void COM::transmitFrame(const std::string &dstMac, const std::string &data) {
+    libnet_clear_packet(lnet);  // Ensure a clean buffer before writing
+    
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+}
+
+// I got this from RxObserver.cpp
+std::vector<uint8_t> COM::getNextPacket() {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    if (!rxBuffer.empty()) {
+        std::vector<uint8_t> packet = rxBuffer.front();
+        rxBuffer.pop();
+        return packet;
+    }
+    return {};  // Return empty if no packets available
+}
+
+std::string COM::getMacAddress() const {
+    return macAddress;
+}
+
+Here's the present compiler output:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/COM.cpp: In member function ‘void COM::transmitFrame(const std::string&, const std::string&)’:
+src/COM.cpp:52:9: error: ‘frame’ was not declared in this scope
+   52 |         frame.getDstMac().data(), frame.getSrcMac().data(),
+      |         ^~~~~
+src/COM.cpp: In member function ‘std::vector<unsigned char> COM::getNextPacket()’:
+src/COM.cpp:68:38: error: ‘bufferMutex’ was not declared in this scope
+   68 |     std::lock_guard<std::mutex> lock(bufferMutex);
+      |                                      ^~~~~~~~~~~
+src/COM.cpp:69:10: error: ‘rxBuffer’ was not declared in this scope
+   69 |     if (!rxBuffer.empty()) {
+      |          ^~~~~~~~
+root@PRED:/usr/local/cmd# 
+
+/////////////////
+
+This is my only compiler error now.  Hey if this works then we'll be able to expand this version of Cmd to 6 COMs wide.  I think now it's only 2 wide.  But we're really on the home stretch to getting a deliverable Cmd component and getting on with the rest of mpp, right partner?
+
+When this compiler error is resolved will we have pretty much what we were looking for?  Which is 6 bidirectional ethernet taps each with individual software control through a Command pattern controlled command mechanism offering tx and rx commands and an Observer pattern controlled RxBuffer.  Am I right about this?  If so then we'll have accomplished the Cmd and we should start thinking about where we're going to go next.  We'll have to talk about the CNL and HUD.
+
+Here's a rough ascii art rendition up of the Heads-Up Display ethernet transaction visualization tool part of the MPP.  It'll be programmed in ncurses and the data displayed is just example data and reality it might end up being only one channel per hud instance.  Btw, the vertical parts are channels.  In particular the area between pipes, labelled with TX in one and RX in the other are the channels and representitive of the actual ethernet cable's TX and TX channels.  The MPPs user defined commands, DSL and Lua scripts will describe what the system does with regards to incoming and outgoing ethernet traffic.  For instance a user could use the user defined commands and/or the DSL and/or Lua scripting (all handled in the Cmd component) to describe a ping and then in running that scenario the CNL and HUD would work together supplied by the NET with network traffic and supplied with instructions from CMD to monitor, visualize and perhaps modify, intervene or initiate network phenomenon.  The CNL delays the traffic from NET to HUD by a slight bit in order to prepare for the oncoming visualizatiion in the HUD.  It's still a vague idea but these scenarios will possibly be complex and powerful but perhaps something like a goal-based process where the input to CNL from CMD telling it the scenario has goals in it that the CNL monitors for and it gives HUD time code information about the meeting of goals, or timeouts or whatever so that when the delayed packet with the time code of the goal event arrives HUD will know how to display the appropriate channel, display alarms, green, red, show data, whatever.
+
+Here's the compiler errors:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/COM.cpp: In member function ‘void COM::detach(std::shared_ptr<IObserver>)’:
+src/COM.cpp:74:48: error: cannot convert ‘std::vector<std::shared_ptr<IObserver> >::iterator’ to ‘const char*’
+   74 |     observers.erase(std::remove(observers.begin(), observers.end(), observer), observers.end());
+      |                                 ~~~~~~~~~~~~~~~^~
+      |                                                |
+      |                                                std::vector<std::shared_ptr<IObserver> >::iterator
+In file included from /usr/include/c++/13/cstdio:42,
+                 from /usr/include/c++/13/ext/string_conversions.h:45,
+                 from /usr/include/c++/13/bits/basic_string.h:4109,
+                 from /usr/include/c++/13/string:54,
+                 from include/EthernetFrame.hpp:6,
+                 from include/COM.hpp:4,
+                 from src/COM.cpp:1:
+/usr/include/stdio.h:158:32: note:   initializing argument 1 of ‘int remove(const char*)’
+  158 | extern int remove (const char *__filename) __THROW;
+      |                    ~~~~~~~~~~~~^~~~~~~~~~
+root@PRED:/usr/local/cmd# 
+
+Let's knock off these Cmd problems and get gone to HUD and CNL, huh partner?
+
+//////////////////////////
+
+Still have that obersvers.erase line problem.  There are some new errors that you might have fixes for:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/COM.cpp: In member function ‘void COM::detach(std::shared_ptr<IObserver>)’:
+src/COM.cpp:74:48: error: cannot convert ‘std::vector<std::shared_ptr<IObserver> >::iterator’ to ‘const char*’
+   74 |     observers.erase(std::remove(observers.begin(), observers.end(), observer), observers.end());
+      |                                 ~~~~~~~~~~~~~~~^~
+      |                                                |
+      |                                                std::vector<std::shared_ptr<IObserver> >::iterator
+In file included from /usr/include/c++/13/cstdio:42,
+                 from /usr/include/c++/13/ext/string_conversions.h:45,
+                 from /usr/include/c++/13/bits/basic_string.h:4109,
+                 from /usr/include/c++/13/string:54,
+                 from include/EthernetFrame.hpp:6,
+                 from include/COM.hpp:4,
+                 from src/COM.cpp:1:
+/usr/include/stdio.h:158:32: note:   initializing argument 1 of ‘int remove(const char*)’
+  158 | extern int remove (const char *__filename) __THROW;
+      |                    ~~~~~~~~~~~~^~~~~~~~~~
+src/COM.cpp: At global scope:
+src/COM.cpp:101:38: error: ‘bufferMutex’ was not declared in this scope
+  101 |     std::lock_guard<std::mutex> lock(bufferMutex);
+      |                                      ^~~~~~~~~~~
+src/COM.cpp:102:5: error: expected unqualified-id before ‘if’
+  102 |     if (!rxBuffer.empty()) {
+      |     ^~
+src/COM.cpp:107:5: error: expected unqualified-id before ‘return’
+  107 |     return {};  // Return empty if no packets available
+      |     ^~~~~~
+src/COM.cpp:108:1: error: expected declaration before ‘}’ token
+  108 | }
+      | ^
+root@PRED:/usr/local/cmd# 
+
+////////////////////
+
+I might have screwed up.  I thought packetHandler was the new equivalent to DEC's getNextPacket, which I actully took from RxObserver.  So it's likely I made a bit of a mess.  Here's my COM.hpp and COM.cpp:
+
+//COM.hpp
+#ifndef COM_HPP
+#define COM_HPP
+
+#include "EthernetFrame.hpp"
+#include "IObserver.hpp"
+#include <pcap.h>
+#include <libnet.h>
+#include <string>
+#include <vector>
+#include <memory>
+#include <queue>
+#include <mutex>
+#include <thread>
+
+class COM {
+public:
+    COM(const std::string& tapName, const std::string& macAddress);
+
+    void transmitFrame(const EthernetFrame& frame);  // Updated signature
+
+    void attach(std::shared_ptr<IObserver> observer);
+    void detach(std::shared_ptr<IObserver> observer);
+    void notify(const std::vector<uint8_t>& packet);
+
+    void startCapture();
+    void stopCapture();
+
+    std::vector<uint8_t> getNextPacket();
+    std::string getMacAddress() const;
+
+private:
+    std::string tapName;
+    std::string macAddress;
+    pcap_t* pcapHandle;
+    libnet_t* lnet;
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    std::queue<std::vector<uint8_t>> rxBuffer;
+    std::mutex bufferMutex;
+    std::vector<std::shared_ptr<IObserver>> observers;
+    bool running;
+    std::thread captureThread;
+
+    bool initializeTAP();
+    bool initializeLibnet();
+    bool initializePcap();
+
+    static void getNextPacket(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
+};
+
+#endif // COM_HPP
+
+
+// COM.cpp
+
+#include "COM.hpp"
+#include "RxObserver.hpp"
+#include "EthernetFrame.hpp"
+#include <pcap.h>
+#include <libnet.h>
+#include <iostream>
+#include <stdexcept>
+#include <algorithm>
+#include <sstream>
+#include <mutex>
+
+COM::COM(const std::string& tapName, const std::string& macAddress) 
+    : tapName(tapName), macAddress(macAddress) {
+    if (!initializeTAP()) {
+        throw std::runtime_error("Failed to initialize TAP device " + tapName);
+    }
+    if (!initializeLibnet()) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+    if (!initializePcap()) {
+        pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+        if (!pcapHandle) {
+            throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
+        }
+    }
+    std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
+}
+
+bool COM::initializeTAP() {
+    std::cout << "Creating TAP device " << tapName << "\n";
+    return !tapName.empty();
+}
+
+bool COM::initializeLibnet() {
+    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+    if (!lnet) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(libnet_geterror(lnet)));
+    }
+    std::cout << "Initializing libnet for " << tapName << "\n";
+    return true;
+}
+
+bool COM::initializePcap() {
+    std::cout << "Initializing pcap for " << tapName << "\n";
+    return !tapName.empty();
+}
+
+// Updated: Use EthernetFrame instead of separate dstMac and data strings
+void COM::transmitFrame(const EthernetFrame& frame) {
+    libnet_clear_packet(lnet);
+
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+}
+
+// Observer pattern methods moved from DCE to COM
+void COM::attach(std::shared_ptr<IObserver> observer) {
+    observers.push_back(observer);
+}
+
+void COM::detach(std::shared_ptr<IObserver> observer) {
+    observers.erase(std::remove(observers.begin(), observers.end(), observer), observers.end());
+}
+
+void COM::notify(const std::vector<uint8_t>& packet) {
+    for (auto& observer : observers) {
+        observer->update(packet);
+    }
+}
+
+// Packet capture methods moved from DCE to COM
+void COM::startCapture() {
+    running = true;
+    captureThread = std::thread([this]() {
+        pcap_loop(pcapHandle, 0, packetHandler, reinterpret_cast<u_char*>(this));
+    });
+}
+
+void COM::stopCapture() {
+    running = false;
+    pcap_breakloop(pcapHandle);
+    if (captureThread.joinable()) {
+        captureThread.join();
+    }
+}
+
+// Fix: Ensure bufferMutex and rxBuffer exist
+static void getNextPacket(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    if (!rxBuffer.empty()) {
+        std::vector<uint8_t> packet = rxBuffer.front();
+        rxBuffer.pop();
+        return packet;
+    }
+    return {};  // Return empty if no packets available
+}
+
+std::string COM::getMacAddress() const {
+    return macAddress;
+}
+
+////////////////////////////////
+
+Whoa, partner!!!  I'm getting excited because this is all that's left:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/COM.cpp: In lambda function:
+src/COM.cpp:89:34: error: cannot convert ‘void (COM::*)(u_char*, const pcap_pkthdr*, const u_char*)’ {aka ‘void (COM::*)(unsigned char*, const pcap_pkthdr*, const unsigned char*)’} to ‘pcap_handler’ {aka ‘void (*)(unsigned char*, const pcap_pkthdr*, const unsigned char*)’}
+   89 |         pcap_loop(pcapHandle, 0, &COM::packetHandler, reinterpret_cast<u_char*>(this));
+      |                                  ^~~~~~~~~~~~~~~~~~~
+      |                                  |
+      |                                  void (COM::*)(u_char*, const pcap_pkthdr*, const u_char*) {aka void (COM::*)(unsigned char*, const pcap_pkthdr*, const unsigned char*)}
+In file included from /usr/include/pcap.h:43,
+                 from include/COM.hpp:6,
+                 from src/COM.cpp:1:
+/usr/include/pcap/pcap.h:565:42: note:   initializing argument 3 of ‘int pcap_loop(pcap_t*, int, pcap_handler, u_char*)’
+  565 | PCAP_API int    pcap_loop(pcap_t *, int, pcap_handler, u_char *);
+      |                                          ^~~~~~~~~~~~
+root@PRED:/usr/local/cmd# 
+
+///////////////////////////
+
+Now I look in Cmd and I see run is empty.  Here's parseCommand and how it was used in Cmd back when we had DCE and this big main():
+
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (std::getline(iss, token, ' ')) {  // Read tokens by space
+        if (!token.empty()) {
+            if (token.front() == '"' && !inQuotes) {
+                inQuotes = true;
+                quotedString = token.substr(1);  // Remove leading quote
+            } else if (token.back() == '"' && inQuotes) {
+                inQuotes = false;
+                quotedString += " " + token.substr(0, token.length() - 1);  // Remove trailing quote
+                args.push_back(quotedString);
+            } else if (inQuotes) {
+                quotedString += " " + token;
+            } else {
+                args.push_back(token);
+            }
+        }
+    }
+
+    return args;
+}
+
+Back then we had pieces of code in inappropriate places so this is how parseCommand was called in Cmd.cpp:
+
+void Cmd::executeCommand(const std::string& name) const {
+    std::vector<std::string> args = parseCommand(name);
+    
+    if (args.empty()) {
+        std::cerr << "Error: Empty command string" << std::endl;
+        return;
+    }
+
+    std::string commandName = args[0];  // First argument is the command name
+
+    auto it = commands.find(commandName);
+    if (it != commands.end()) {
+        args.erase(args.begin());  // Remove command name from args before passing
+        it->second.execute(args);
+    } else {
+        std::cerr << "Command not found: " << commandName << std::endl;
+    }
+}
+
+But the thing is that it really worked good for handling the command line so we should reuse it.  It's just that in the new refactored Cmd and the Cmd class in particular I don't know how to use it.
+
+This is the current Cmd.hpp:
+
+#ifndef CMD_HPP
+#define CMD_HPP
+
+#include "Command.hpp"
+#include "COM.hpp"
+#include <unordered_map>
+#include <vector>
+#include <memory>
+#include <functional>
+#include <string>
+
+class Cmd {
+public:
+    explicit Cmd(std::vector<std::shared_ptr<COM>>& dces);
+    void addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func);
+    void run();
+
+private:
+    std::unordered_map<std::string, Command> commands;
+    std::vector<std::shared_ptr<COM>> dceList;
+};
+
+#endif // CMD_HPP
+
+and this is the current Cmd.cpp:
+
+#include "Cmd.hpp"
+#include <iostream>
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : dceList(coms) {}
+
+void Cmd::addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func) {
+    commands.emplace(name, Command(name, func));
+}
+
+void Cmd::run() {
+    std::cout << "Cmd loop running..." << std::endl;
+    // Implement command execution loop here
+}
+
+At one point in the various iterations of the evolution the Cmd class constructor created the Command object that were the commands send() and recv() and those two commands will be hooked to transmitFrame() and getNextPacket() right?  Remember when it was something like that?
+
+It looks like out present Cmd class needs an addCommand() method and a executeCommand() method,if I'm not mistaken.
+
+Can you plese fix these problems?
+
+///////////////////////////////
+
+Here's some more errors:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Cmd.cpp: In lambda function:
+src/Cmd.cpp:47:42: error: cannot convert ‘std::vector<unsigned char>’ to ‘const EthernetFrame&’
+   47 |         dceList[dceIndex]->transmitFrame(frameData);
+      |                                          ^~~~~~~~~
+      |                                          |
+      |                                          std::vector<unsigned char>
+In file included from include/Cmd.hpp:5,
+                 from src/Cmd.cpp:1:
+include/COM.hpp:19:45: note:   initializing argument 1 of ‘void COM::transmitFrame(const EthernetFrame&)’
+   19 |     void transmitFrame(const EthernetFrame& frame);  // Updated signature
+      |                        ~~~~~~~~~~~~~~~~~~~~~^~~~~
+root@PRED:/usr/local/cmd# 
+
+We've got to be very close now.  This will be a very exciting fix because it's hooking up our transmit capability!
+
+//////////////////////////////
+
+Ooo almost, but we've got a niggling issue here:
+
+EthernetFrame::EthernetFrame(const std::array<uint8_t, 6>& srcMac, 
+                             const std::array<uint8_t, 6>& dstMac, 
+                             const std::vector<uint8_t>& payload) 
+    : srcMac(srcMac), dstMac(dstMac), payload(payload) {}
+
+You haven't seen EthernetFrame for a while and I'll bet you forgot it's header details.
+
+Here's line 48 and 49 of Cmd.cpp:
+    // Construct an EthernetFrame
+    EthernetFrame frame(frameData);
+
+Here's the compiler errors:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Cmd.cpp: In lambda function:
+src/Cmd.cpp:49:34: error: no matching function for call to ‘EthernetFrame::EthernetFrame(std::vector<unsigned char>&)’
+   49 |     EthernetFrame frame(frameData);
+      |                                  ^
+In file included from include/COM.hpp:4,
+                 from include/Cmd.hpp:5,
+                 from src/Cmd.cpp:1:
+include/EthernetFrame.hpp:14:5: note: candidate: ‘EthernetFrame::EthernetFrame(const std::array<unsigned char, 6>&, const std::array<unsigned char, 6>&, const std::vector<unsigned char>&)’
+   14 |     EthernetFrame(const std::array<uint8_t, 6>& srcMac,
+      |     ^~~~~~~~~~~~~
+include/EthernetFrame.hpp:14:5: note:   candidate expects 3 arguments, 1 provided
+include/EthernetFrame.hpp:12:7: note: candidate: ‘EthernetFrame::EthernetFrame(const EthernetFrame&)’
+   12 | class EthernetFrame {
+      |       ^~~~~~~~~~~~~
+include/EthernetFrame.hpp:12:7: note:   no known conversion for argument 1 from ‘std::vector<unsigned char>’ to ‘const EthernetFrame&’
+include/EthernetFrame.hpp:12:7: note: candidate: ‘EthernetFrame::EthernetFrame(EthernetFrame&&)’
+include/EthernetFrame.hpp:12:7: note:   no known conversion for argument 1 from ‘std::vector<unsigned char>’ to ‘EthernetFrame&&’
+root@PRED:/usr/local/cmd# 
+
+/////////////////////////
+
+Oh no, guess what, I forgot about TAP initialization in Cmd::Cmd().  I found out quickly when I went to step through execution with the VSCode debugger.  I've got it something like this but it's wrong:
+
+COM::COM(const std::string& tapName, const std::string& macAddress) 
+    : tapName(tapName), macAddress(macAddress) {
+    if (!initializeTAP()) {
+        throw std::runtime_error("Failed to initialize TAP device " + tapName);
+    }
+    if (!initializeLibnet()) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+    if (!initializePcap()) {
+        pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+        if (!pcapHandle) {
+            throw std::runtime_error("Failed to open TAP device for pcap: " + std::string(errbuf));
+        }
+    }
+    std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
+}
+
+std::string COM::initializeTAP() {
+    int tap_fd = open("/dev/net/tun", O_RDWR);
+    if (tap_fd < 0) {
+        throw std::runtime_error("Failed to open /dev/net/tun");
+    }
+
+    struct ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, tapName, IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tap_fd, TUNSETIFF, &ifr) < 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to create TAP device " + tapName);
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to bring TAP device up");
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return tapName;
+}
+
+bool COM::initializeLibnet() {
+    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+    if (!lnet) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(libnet_geterror(lnet)));
+    }
+    std::cout << "Initializing libnet for " << tapName << "\n";
+    return true;
+}
+
+bool COM::initializePcap() {
+    std::cout << "Initializing pcap for " << tapName << "\n";
+    return !tapName.empty();
+}
+
+The code I got for the screwed up initializeTAP() I got from the createTapDevice() that was above main() in the DCE days:
+
+std::string createTapDevice(const std::string& tapName) {
+    int tap_fd = open("/dev/net/tun", O_RDWR);
+    if (tap_fd < 0) {
+        throw std::runtime_error("Failed to open /dev/net/tun");
+    }
+
+    struct ifreq ifr = {};
+    std::strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tap_fd, TUNSETIFF, &ifr) < 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to create TAP device " + tapName);
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        close(tap_fd);
+        throw std::runtime_error("Failed to bring TAP device up");
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return tapName;
+}
+
+Of course the new type of initializeTAP returns a bool, which looks a bit slicker.
+
+While we're at it, can you create all six right now, instead of just the two.  Weren't we going to store the 6 mac addresses in #define macros?  Correct me if I'm wrong but can't we ignore the tap-to-mac table for now because at the low level we're dealing with a physical device sounding name is appropriate tap0, tap1, ... tap5.  Feel free to give them default mac addresses of your choice.
+
+///////////////////////////
+
+Just a couple more:
+
+src/Cmd.cpp: In constructor ‘Cmd::Cmd(std::vector<std::shared_ptr<COM> >&)’:
+src/Cmd.cpp:34:60: error: ‘MAC0’ was not declared in this scope
+   34 |         dceList.emplace_back(std::make_unique<COM>("tap0", MAC0));
+      |                                                            ^~~~
+src/Cmd.cpp:35:60: error: ‘MAC1’ was not declared in this scope
+   35 |         dceList.emplace_back(std::make_unique<COM>("tap1", MAC1));
+      |                                                            ^~~~
+src/Cmd.cpp:36:60: error: ‘MAC2’ was not declared in this scope
+   36 |         dceList.emplace_back(std::make_unique<COM>("tap2", MAC2));
+      |                                                            ^~~~
+src/Cmd.cpp:37:60: error: ‘MAC3’ was not declared in this scope
+   37 |         dceList.emplace_back(std::make_unique<COM>("tap3", MAC3));
+      |                                                            ^~~~
+src/Cmd.cpp:38:60: error: ‘MAC4’ was not declared in this scope
+   38 |         dceList.emplace_back(std::make_unique<COM>("tap4", MAC4));
+      |                                                            ^~~~
+src/Cmd.cpp:39:60: error: ‘MAC5’ was not declared in this scope
+   39 |         dceList.emplace_back(std::make_unique<COM>("tap5", MAC5));
+      |                                                            ^~~~
+src/COM.cpp: In constructor ‘COM::COM(const std::string&, const std::string&)’:
+src/COM.cpp:20:49: error: class ‘COM’ does not have any field named ‘tapFd’
+   20 |     : tapName(tapName), macAddress(macAddress), tapFd(-1), lnet(nullptr), pcapHandle(nullptr) {
+      |                                                 ^~~~~
+src/COM.cpp: In member function ‘bool COM::initializeTAP()’:
+src/COM.cpp:37:5: error: ‘tapFd’ was not declared in this scope
+   37 |     tapFd = open("/dev/net/tun", O_RDWR);
+      |     ^~~~~
+root@PRED:/usr/local/cmd# 
+
+I don't know wht to do about those tapFd errors.
+
+//////////////////////////////
+
+I'm naming MAC addresses in two places, main and COM.hpp it seems.  Main has this:
+
+int main() {
+    try {
+        // Initialize DCE instances
+        std::vector<std::shared_ptr<COM>> coms;
+        coms.push_back(std::make_shared<COM>("tap0", "00:11:22:33:44:00"));
+        coms.push_back(std::make_shared<COM>("tap1", "00:11:22:33:44:01"));
+        coms.push_back(std::make_shared<COM>("tap2", "00:11:22:33:44:02"));
+        coms.push_back(std::make_shared<COM>("tap3", "00:11:22:33:44:03"));
+        coms.push_back(std::make_shared<COM>("tap4", "00:11:22:33:44:04"));
+        coms.push_back(std::make_shared<COM>("tap5", "00:11:22:33:44:05"));
+
+        // Initialize command interface
+        Cmd cmd(coms);
+        
+        // Run the command loop
+        cmd.run();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+    
+    return 0;
+}
+
+and COM.hpp has this:
+
+constexpr std::array<const char*, 6> MAC_ADDRESSES = {
+    "00:11:22:33:44:00", "00:11:22:33:44:01", "00:11:22:33:44:02",
+    "00:11:22:33:44:03", "00:11:22:33:44:04", "00:11:22:33:44:05"
+};
+
+and Cmd.cpp has this:
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : dceList(coms) {
+
+    try {
+
+        for (int i = 0; i < 6; ++i) {
+            dceList.emplace_back(std::make_unique<COM>("tap" + std::to_string(i), MAC_ADDRESSES[i]));
+        }
+
+        std::cout << "All TAP devices initialized successfully.\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Error initializing TAPs: " << e.what() << "\n";
+        throw;  // Fail early if TAP setup is broken
+    }
+
+So somewhere things are getting mixed up and I hope you can quickly fix, which I have confidence in.  Incidentally we should change dceList to comList either now or later some time.
+
+Here's terminal output, which looks very nice until I hit the Cmd constructor in main():
+
+Created TAP device: tap0
+Libnet initialized for tap0
+Pcap initialized for tap0
+COM initialized for tap0 with MAC 00:11:22:33:44:00
+Created TAP device: tap1
+Libnet initialized for tap1
+Pcap initialized for tap1
+COM initialized for tap1 with MAC 00:11:22:33:44:01
+Created TAP device: tap2
+Libnet initialized for tap2
+Pcap initialized for tap2
+COM initialized for tap2 with MAC 00:11:22:33:44:02
+Created TAP device: tap3
+Libnet initialized for tap3
+Pcap initialized for tap3
+COM initialized for tap3 with MAC 00:11:22:33:44:03
+Created TAP device: tap4
+Libnet initialized for tap4
+Pcap initialized for tap4
+COM initialized for tap4 with MAC 00:11:22:33:44:04
+Created TAP device: tap5
+Libnet initialized for tap5
+Pcap initialized for tap5
+COM initialized for tap5 with MAC 00:11:22:33:44:05
+
+It crashed in the Cmd constructor the very first time it tries doing this:
+
+        for (int i = 0; i < 6; ++i) {
+            dceList.emplace_back(std::make_unique<COM>("tap" + std::to_string(i), MAC_ADDRESSES[i]));
+        }
+
+All the taps vanish from wireshark and the program crashes out.
+
+I have the MAC_ADDRESSES in COM.hpp:
+
+constexpr std::array<const char*, 6> MAC_ADDRESSES = {
+    "00:11:22:33:44:00", "00:11:22:33:44:01", "00:11:22:33:44:02",
+    "00:11:22:33:44:03", "00:11:22:33:44:04", "00:11:22:33:44:05"
+};
+
+It looks like it's trying to reinitialize everything because the line above causes this in the program output:
+
+Failed to create TAP device tap0
+Error initializing TAPs: Failed to initialize TAP device tap0
+Error: Failed to initialize TAP device tap0
+[1] + Done                       "/usr/bin/gdb" --interpreter=mi --tty=${DbgTerm} 0<"/tmp/Microsoft-MIEngine-In-a2wdhtpr.cdf" 1>"/tmp/Microsoft-MIEngine-Out-tsmllr22.tl0"
+root@PRED:/usr/local/cmd# 
+
+///////////////////////////////////
+
+Well I'm stepping through program execution and trying to do a send command.  I've tried the following:
+
+>send 0 00:11:22:33:44:02 00:11:22:33:44:01 "Hello tap1, from tap0!!!"
+
+>send 0 0x00:0x11:0x22:0x33:0x44:0x02 0x00:0x11:0x22:0x33:0x44:0x01 0x48:0x65:0x6c:0x6c:0x6f:0x20:0x74:0x61:0x70:0x31:0x2c:0x20:0x66:0x72:0x6f:0x6d:0x20:0x74:0x61:0x70:0x30:0x21:0x21:0x21
+
+>send 0 00:11:22:33:44:02 00:11:22:33:44:01 48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21
+
+It crashes out and kills all the taps in about the third iteration of this for loop.
+
+
+
+        for (int i = 0; i < 6; ++i) {
+            dstMac[i] = static_cast<uint8_t>(std::stoi(args[i + 1], nullptr, 16));
+        }
+
+//////////////////////////////////
+
+Before your helper function and just the information from you about the format it expects the input line:
+
+With this input:
+send "00" "00", "11", "22", "33", "44", "02" "00", "11", "22", "33", "44", "01" "48", "65", "6c", "6c", "6f", "20", "74", "61", "70", "31", "2c", "20", "66", "72", "6f", "6d", "20", "74", "61", "70", "30", "21", "21", "21"
+
+
+These were the args at parse dst mac and notice that the arg[0] still has the dce index:
+
+arg[0] = "00\" \"00\", \"11\", \"22\", \"33\", \"44\", \"02"
+
+arg[1] = 00\", \"11\", \"22\", \"33\", \"44\", \"01"
+
+arg[2] = "48\", \"65\", \"6c\", \"6c\", \"6f\", \"20\", \"74\", \"61\", \"70\", \"31\", \"2c\", \"20\", \"66\", \"72\", \"6f\", \"6d\", \"20\", \"74\", \"61\", \"70\", \"30\", \"21\", \"21\", \"21"
+
+So I put in the lovely new parseMacAddress() and now I get this error:
+
+root@PRED:/usr/local/cmd# g++ -o cmd src/main.cpp src/Cmd.cpp src/Command.cpp src/EthernetFrame.cpp src/COM.cpp src/RxObserver.cpp -Iinclude -lnet -lpcap -ljsoncpp -lpthread -g
+src/Cmd.cpp: In lambda function:
+src/Cmd.cpp:70:34: error: cannot convert ‘std::array<unsigned char, 6>’ to ‘uint8_t*’ {aka ‘unsigned char*’}
+   70 |         parseMacAddress(args[1], dstMac);
+      |                                  ^~~~~~
+      |                                  |
+      |                                  std::array<unsigned char, 6>
+src/Cmd.cpp:32:58: note:   initializing argument 2 of ‘void parseMacAddress(const std::string&, uint8_t*)’
+   32 | void parseMacAddress(const std::string& macStr, uint8_t* dstMac) {
+      |                                                 ~~~~~~~~~^~~~~~
+
+Here's my Cmd.cpp:
+
+include "Cmd.hpp"
+#include "COM.hpp"
+#include <iostream>
+#include <sstream>
+
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (std::getline(iss, token, ' ')) {
+        if (!token.empty()) {
+            if (token.front() == '"' && !inQuotes) {
+                inQuotes = true;
+                quotedString = token.substr(1);
+            } else if (token.back() == '"' && inQuotes) {
+                inQuotes = false;
+                quotedString += " " + token.substr(0, token.length() - 1);
+                args.push_back(quotedString);
+            } else if (inQuotes) {
+                quotedString += " " + token;
+            } else {
+                args.push_back(token);
+            }
+        }
+    }
+    return args;
+}
+
+void parseMacAddress(const std::string& macStr, uint8_t* dstMac) {
+    std::stringstream ss(macStr);
+    std::string byte;
+    int i = 0;
+
+    while (std::getline(ss, byte, ':')) {
+        if (i >= 6) {
+            throw std::runtime_error("Invalid MAC address format.");
+        }
+        dstMac[i++] = static_cast<uint8_t>(std::stoi(byte, nullptr, 16));
+    }
+
+    if (i != 6) {
+        throw std::runtime_error("Incomplete MAC address.");
+    }
+}
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
+
+    std::cout << "Cmd initialized with existing COM instances.\n";
+
+    // Register built-in commands
+    addCommand("send", [this](const std::vector<std::string>& args) {
+        if (args.size() < 4) {  // 6 bytes src MAC, 6 bytes dst MAC, at least 1-byte payload
+            std::cerr << "Usage: send <dce_index> <dst_mac> <src_mac> <hex_data...>" << std::endl;
+            return;
+        }
+
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+
+        std::array<uint8_t, 6> dstMac;
+        std::array<uint8_t, 6> srcMac;
+
+        // Parse destination MAC
+        parseMacAddress(args[1], dstMac);
+
+        // Parse source MAC
+        for (int i = 0; i < 6; ++i) {
+            srcMac[i] = static_cast<uint8_t>(std::stoi(args[i + 7], nullptr, 16));
+        }
+
+        // Parse payload (rest of the args)
+        std::vector<uint8_t> payload;
+        for (size_t i = 13; i < args.size(); ++i) {
+            payload.push_back(static_cast<uint8_t>(std::stoi(args[i], nullptr, 16)));
+        }
+
+        // Construct the EthernetFrame correctly
+        EthernetFrame frame(srcMac, dstMac, payload);
+
+        // Now call transmitFrame() with the correct type
+        comList[dceIndex]->transmitFrame(frame);
+    });
+
+    addCommand("recv", [this](const std::vector<std::string>& args) {
+        if (args.empty()) {
+            std::cerr << "Usage: recv <dce_index>" << std::endl;
+            return;
+        }
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+        std::vector<uint8_t> packet = comList[dceIndex]->getNextPacket();
+        std::cout << "Received packet: ";
+        for (uint8_t byte : packet) {
+            printf("%02X ", byte);
+        }
+        std::cout << std::endl;
+    });
+}
+
+void Cmd::addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func) {
+    commands.emplace(name, Command(name, func));
+}
+
+void Cmd::executeCommand(const std::string& input) {
+    std::vector<std::string> args = parseCommand(input);
+
+    if (args.empty()) {
+        std::cerr << "Error: Empty command string" << std::endl;
+        return;
+    }
+
+    std::string commandName = args[0];  // First argument is the command name
+    auto it = commands.find(commandName);
+    if (it != commands.end()) {
+        args.erase(args.begin());  // Remove command name from args before passing
+        it->second.execute(args);
+    } else {
+        std::cerr << "Command not found: " << commandName << std::endl;
+    }
+}
+
+void Cmd::run() {
+    std::cout << "Cmd loop running... Type 'exit' to quit." << std::endl;
+    std::string input;
+    while (true) {
+        std::cout << "> ";
+        std::getline(std::cin, input);
+        if (input == "exit") break;
+        executeCommand(input);
+    }
+}
+
+///////////////////////////
+
+It's looking really good.  I'm putting in this for input:
+
+send 0 00:11:22:33:44:02 00:11:22:33:44:01 48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21
+
+and the two macs and the type(ipv4 = 0x0800) is captured by wireshark.  But this code:
+
+        for (size_t i = 13; i < args.size(); ++i) {
+            payload.push_back(static_cast<uint8_t>(std::stoi(args[i], nullptr, 16)));
+        }
+
+skips over the payload handling.  What it wants for data to transmit which is:
+
+arg[3] = "48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21"
+
+////////////////
+
+This is a cool system, partner.  Thanks for the help.  I couldn't have done this without you.
+
+I can see the frames being transmitted on wireshark with this command:
+
+
+send 0 00:11:22:33:44:01 00:11:22:33:44:00 48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21
+
+it's addressed to tap1 but tap1 on wiresharkk doesn't see it.  I tried a bridge and still there's nothing at tap1:
+
+root@PRED:/usr/local/cmd# brctl addbr br0
+root@PRED:/usr/local/cmd# sudo brctl addif br0 tap0
+root@PRED:/usr/local/cmd# sudo brctl addif br0 tap1
+root@PRED:/usr/local/cmd# ip link show | grep tap
+244: tap0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UNKNOWN mode DEFAULT group default qlen 1000
+245: tap1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UNKNOWN mode DEFAULT group default qlen 1000
+246: tap2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+247: tap3: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+248: tap4: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+249: tap5: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+
+How's this for a plan?  I can clone the git repo and make a cmd executable and run it in a differnet window that has another set of mac addresses, as though it was another component of mpp - and try to send on one and recv on the other.
+
+///////////////////
+
+
+=======
+>>>>>>> origin/main
 
