@@ -3797,3 +3797,53 @@ so maybe if I took the initializeTAP() out of the process and then for initializ
 
 ////////////////////////////////
 
+Create the network namespace:
+
+#cleanup
+ip netns del mynetns 2>/dev/null  # Clean up old attempts
+ip netns add mynetns
+
+#creat taps
+# Create the TAP devices
+ip tuntap add mode tap cmd0
+ip tuntap add mode tap hud0
+
+# Assign MAC addresses
+ip link set dev cmd0 address 02:00:00:00:00:01
+ip link set dev hud0 address 02:00:00:00:01:01
+
+#move taps into namespace
+ip link set cmd0 netns mynetns
+ip link set hud0 netns mynetns
+
+#setup bridge in namespace
+ip netns exec mynetns ip link add br0 type bridge
+ip netns exec mynetns ip link set br0 address 02:00:00:00:02:01
+
+#attach taps to bridge
+ip netns exec mynetns ip link set cmd0 master br0
+ip netns exec mynetns ip link set hud0 master br0
+
+#bring everything up
+ip netns exec mynetns ip link set br0 up
+ip netns exec mynetns ip link set cmd0 up
+ip netns exec mynetns ip link set hud0 up
+
+#disable stp
+ip netns exec mynetns ip link set br0 type bridge stp_state 0
+
+#enable forwarding in namespace
+ip netns exec mynetns sysctl -w net.ipv4.conf.all.forwarding=1
+
+#verify it works
+ip netns exec mynetns ip link show
+
+put in cmd
+send 0 bc:e9:2f:80:3b:56 ec:b1:d7:52:8C:52 48:65:6C:6C:6F:20:68:75:64:30:20:66:72:6F:6D:20:63:6D:64:30:20:21:21:21
+send 0 02:00:00:00:01:01 02:00:00:00:00:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
+send 0 86:a5:74:7d:36:1f 02:00:00:00:00:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
+
+put in hud
+send 0 02:00:00:00:00:01 02:00:00:00:01:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
+send 0 86:a5:74:7d:36:1f 02:00:00:00:01:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
+
