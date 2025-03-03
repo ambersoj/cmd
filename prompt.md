@@ -3524,12 +3524,276 @@ but it still crashes with bytes written -1.
 
 ////////////////////////////////
 
-I have an idea.  There's a laptop that's hooked with this desktop I'm working on with and I'm pretty familiar with running libnet between these two machines in layer 2 and I even have a little packet generator program I can use.  Then I can skirt this whole virtualization thing for a while and at least see if I can blast packets out the NIC.
+Ok there was a bit of an issue with libnet but now the hud0 and cmd0 can both get a ping out to their wiresharks but the messages never make it to the other tap.  Here's the status of the taps and bridge:
 
-I'll just make dev in libnet = eno1 and bingo bango.  Anyway, I'm writing this on the fly and right now, though, I'm going to finish going through your suggestions.
+540: hud0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UP mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:01:01 brd ff:ff:ff:ff:ff:ff
+
+582: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+
+581: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 86:a5:74:7d:36:1f brd ff:ff:ff:ff:ff:ff
+
+root@PRED:/usr/local/cmd# brctl show br0
+bridge name     bridge id               STP enabled     interfaces
+br0             8000.86a5747d361f       no              cmd0
+                                                        hud0
+
+I tried it with a bridge with 02 00 00 00 02 01 but it didn't work either.
+
+I hooked it up to the NIC eno1 and it worked no problem. We should try to get the report that ip link show issues for them to be the same as it is for this:
+
+2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether ec:b1:d7:52:8c:52 brd ff:ff:ff:ff:ff:ff
+    altname enp0s25
+
+This is cmd0 on a bridge:
+582: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+
+This is cmd0 with no bridge:
+582: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+
+And look I can take it down and it reports DOWN but taking it back up it still says state UNKNOWN:
+
+root@PRED:/usr/local/cmd# ip link show | grep cmd0
+582: cmd0: <BROADCAST,MULTICAST> mtu 1500 qdisc fq_codel state DOWN mode DEFAULT group default qlen 1000
+root@PRED:/usr/local/cmd# ip link set cmd0 up
+root@PRED:/usr/local/cmd# ip link show | grep cmd0
+582: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UNKNOWN mode DEFAULT group default qlen 1000
+
+Hey, look what I found.  I'll have to keep this loopback in mind because it might come in handy.  Who knows, maybe if a guy figures out how to run the lo then maybe he's figured out the subtleties of these virtual devices:
+
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+
+//////////////////////////////////////////
 
 
+Here's how the bridge reports the MACs it's handling:
+
+root@PRED:/usr/local/cmd# brctl showmacs br0
+port no mac addr                is local?       ageing timer
+  1     02:00:00:00:00:01       yes                0.00
+  1     02:00:00:00:00:01       yes                0.00
+  2     02:00:00:00:01:01       yes                0.00
+  2     02:00:00:00:01:01       yes                0.00
 
 
+root@PRED:/usr/local/cmd# tcpdump -i cmd0 -e -nn
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on cmd0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+14:26:01.401538 02:00:00:00:00:01 > 02:00:00:00:01:01, ethertype IPv4 (0x0800), length 56: 192.168.200.1 > 192.168.200.2: ICMP echo request, id 1234, seq 1, length 22
 
+root@PRED:/usr/local/cmd# tcpdump -i hud0 -e -nn
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on hud0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+14:28:58.127169 02:00:00:00:01:01 > 02:00:00:00:00:01, ethertype IPv4 (0x0800), length 56: 192.168.200.2 > 192.168.200.1: ICMP echo request, id 1234, seq 1, length 22
+
+Packets show on both hud0 and cmd0 but only egress.
+
+
+Here's running those sysctl calls:
+
+root@PRED:/usr/local/cmd# sysctl net.bridge.bridge-nf-call-iptables
+sysctl: cannot stat /proc/sys/net/bridge/bridge-nf-call-iptables: No such file or directory
+root@PRED:/usr/local/cmd# sysctl net.bridge.bridge-nf-call-arptables
+sysctl: cannot stat /proc/sys/net/bridge/bridge-nf-call-arptables: No such file or directory
+root@PRED:/usr/local/cmd# sysctl net.ipv4.ip_forward
+net.ipv4.ip_forward = 1
+
+The first time I ran it net.ipv4.ip_forward was 0 and I set it to 1.  But it didn't work either way.  It's probably best left as 1, I'd imagine.  But maybe there are some more steps.  And I also don't like the way cmd0 reports it's status not UP, not DOWN but UNKNOWN.
+
+/////////////////////////
+
+Hi partner, I'm still having issues with these coms, but that's the life of an engineer.  You did a fantastic job and I consider your work to be a complete product.  It's just little bit of fussing at this point.  So thank you for making the MPP possible.
+
+I'd like to just talk with you for a while.  I've been looking into some ethernet layer two stuff and I've uncovered that the stuff we're mucking around with, these TUN/TAPS is used by VPNs because tunneling is advantagous to their business somehow.  I wonder if the VPN guys might have some code or documentation about how to cofigure these things.  In my reading it's possible things have changed over the years.  The stuff I was reading was lots of times about 10 years old.  I wonder if we're trying some outdated stuff.
+
+
+///////////////////////////////////////
+
+Do you think there are linux distros that are more geared to hobbyists who want to get down into the guts of their computing machines?  I wonder if slackware would be minimalist and offer up their taps a little more easily.
+
+Of course there is the LFS project which taught me that, if I wanted to enough, make my own linux distro.  Could I do that and write my own NIC/TUN/TAP driver?
+
+///////////////////////////////
+
+Chat GPT sessions age and get slow and eventually unusable.  We first started when I had to leave another session where what I had at that point was a Command pattern and a bit of a plan and a tap-to-mac table.  For this Chat GPT session I did phenominally well - this cmd will do very nicely for the MPP.
+
+So I'll probably not waste my remaining time with you on deeply technical things for a little while now, but just talk about things.  Talking with you, now that you know everything from that Command pattern, little document and tap-to-mac table, is immensely valuable to me.  Who knows where it will take us?
+
+Eventually I think I'd like to build a distro and get into drivers and all that but I don't think now is a time that it's appropriate.  Looking into these VPNs and layer2 protocols might be paydirt because I might find some very pertinent code or an article or something about TAPs but also it'll be very educational.  Maybe we can pick through some open vpn code or look at some of the linux kernel code regarding TUN and TAP stuff.  But I'm definitely excited about a layer 2 solution and I'm not going to change from that.
+
+Correct me if I'm wrong, but wouldn't a 4 component full duplex DTC/DCE ethernet network such as MPP with the cmd at the components' core, have lots and lots of real-time computing power?  With each component a stand-alone process that guarantees it a big OS timeslice all to itself.  And a computer runs way way way faster than the ethernet/internet so we've got a ridiculously huge real time advantage over the speed of ethernet, and then on top of that the mpp has multiple parallel ethernet channels and total flexibility over the routing of channels of ethernet and the processing.  Would there be a possibilty of the differnce in speed of my computer and ethernet or the internet being great enough that each component could set up something like it's own bank of RAM memory and this mass of ethernet capability at the system's disposal could keep it synchronized in a way that's cheap but valuable?
+
+///////////////////////////
+
+Do you think we could find the exact kernel code that's in my PC?  If so, then that sounds like a very good thing to us to look into - it a little bit of everything, a change of pace, an exploration, possibly a solution to the TAP issues too.
+
+////////////////////////////////
+
+I make this tap on one side of the bridge:
+
+        "cmd0", "02:00:00:00:00:01"
+
+and this on the other side of the bridge:
+
+        "hud0", "02:00:00:00:01:01"
+
+If I had my choice of bridge I'd make:
+
+        "br0", "02:00:00:00:02:01"
+
+////////////////////
+
+The bridge says it's UP one place and DOWN another:
+
+2: br0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc noqueue state DOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:02:01 brd ff:ff:ff:ff:ff:ff
+3: cmd0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc fq_codel master br0 state DOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+4: hud0: <NO-CARRIER,BROADCAST,MULTICAST,UP> mtu 1500 qdisc fq_codel master br0 state DOWN mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:01:01 brd ff:ff:ff:ff:ff:ff
+
+But the good new is that they come up under that namespace and they're UP in one place.  Maybe that NO-CARRIER goes along with the DOWN.
+
+For this line:
+
+sudo ip netns exec mynetns ip addr add 192.168.200.1/24 dev cmd0
+sudo ip netns exec mynetns ip addr add 192.168.200.2/24 dev hud0
+
+I tweaked it for my own test IPs.
+
+I can't see the namespace nor the taps in wireshark now.  I just created a tap and deleted a tap and watched it appear and vanish in wireshark.
+
+/////////////////////////////////
+
+My program created the taps.  Here's an example of cmd0:
+
+int main() {
+    try {
+        // Initialize COM instances for CMD
+        std::vector<std::shared_ptr<COM>> coms;
+        coms.push_back(std::make_shared<COM>("cmd0", "02:00:00:00:00:01"));
+
+trough this routine called for the COM constructor:
+
+bool COM::initializeTAP() {
+    tapFd = open("/dev/net/tun", O_RDWR);
+    if (tapFd < 0) {
+        std::cerr << "Failed to open /dev/net/tun\n";
+        return false;
+    }
+
+    struct ifreq ifr = {};
+    strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
+        std::cerr << "Failed to create TAP device " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to bring TAP device up: " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return true;
+}
+
+and here:
+
+bool COM::initializeLibnet() {
+    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+    if (!lnet) {
+        std::cerr << "Libnet init failed for " << tapName << ": " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Libnet initialized for " << tapName << "\n";
+    return true;
+}
+
+above the tapName.c_str is com0, or in the other program hud0.
+
+and then it's used here:
+
+void COM::sendPing(std::shared_ptr<COM> com) {
+    libnet_t* lnet = com->getLibnetHandle();  // Get libnet handle from COM
+
+    uint8_t dstMac[6] = {0x86, 0xa5, 0x74, 0x7d, 0x36, 0x1f};
+    uint8_t srcMac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+
+    uint32_t srcIP = libnet_name2addr4(lnet, (char*)"192.168.200.1", LIBNET_DONT_RESOLVE);
+    uint32_t dstIP = libnet_name2addr4(lnet, (char*)"192.168.200.2", LIBNET_DONT_RESOLVE);
+
+    libnet_clear_packet(lnet);
+
+    // 🏗 Build ICMP Packet
+    uint8_t payload[] = "ICMP PING TEST";
+    uint32_t payloadSize = sizeof(payload) - 1;
+
+    libnet_ptag_t icmpTag = libnet_build_icmpv4_echo(
+        8, 0, 0, 1234, 1,  // Type, Code, Checksum, ID, Sequence
+        payload, payloadSize,
+        lnet, 0
+    );
+    if (icmpTag == -1) {
+        throw std::runtime_error("ICMP build error: " + std::string(libnet_geterror(lnet)));
+    }
+
+    // 🏗 Build IP Header
+    libnet_ptag_t ipTag = libnet_build_ipv4(
+        LIBNET_IPV4_H + LIBNET_ICMPV4_ECHO_H + payloadSize, 
+        0, 0, 0, 64, IPPROTO_ICMP, 0, srcIP, dstIP,
+        NULL, 0, lnet, 0
+    );
+    if (ipTag == -1) {
+        throw std::runtime_error("IP build error: " + std::string(libnet_geterror(lnet)));
+    }
+
+    // Construct Ethernet Frame
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        dstMac, srcMac,
+        ETHERTYPE_IP, NULL, 0,
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        std::cerr << "Error building Ethernet packet: " << libnet_geterror(lnet) << std::endl;
+        return;
+    }
+
+    // Send packet
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send ICMP Ping: " + std::string(libnet_geterror(lnet)));
+    }
+
+    std::cout << "ICMP Ping sent! (" << bytesWritten << " bytes)" << std::endl;
+}
+
+There's this in the constructor:
+
+OM::COM(const std::string& tapName, const std::string& macAddress)
+    : tapName(tapName), macAddress(macAddress), tapFd(-1), lnet(nullptr), pcapHandle(nullptr) {
+
+    if (!initializeTAP()) {
+        throw std::runtime_error("Failed to initialize TAP device " + tapName);
+    }
+    if (!initializeLibnet()) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+
+so maybe if I took the initializeTAP() out of the process and then for initializeLibnet for now instead of tapName.c_str() for dev I'll put in cmd0, or hud0 and hopefully because I'm not creating it, it'll just find those ones in the name space.  Or do I have to do more to get the program to hook up to the taps we hooked up in the namespace?
+
+////////////////////////////////
 

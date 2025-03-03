@@ -99,6 +99,7 @@ void COM::transmitFrame(const EthernetFrame& frame) {
 }
 
 void COM::sendPing(std::shared_ptr<COM> com) {
+    initializeLibnet();
     libnet_t* lnet = com->getLibnetHandle();  // Get libnet handle from COM
 
     uint8_t dstMac[6] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x01};
