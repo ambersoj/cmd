@@ -3931,5 +3931,49 @@ What do you think of that?
 
 ////////////////////////////////
 
+I'm programmatically in c++ initializing some linux kernel taps of tun/tap.  But I'm having difficulty getting from one of my programs to another one of my programs with taps and using layer 2 so I'm going to try to make ip tuns instead of ethernet taps.  I'd like your help in changing the code to bring up the tun and configure it with a mac address of 02:00:00:00:00:01 and an ip address of 10.0.0.1 and call it cmd0.
+
+Here's the existing initialization code for the a tap.  This is what I want to be changed to a tun:
+
+bool COM::initializeTAP() {
+    tapFd = open("/dev/net/tun", O_RDWR);
+    if (tapFd < 0) {
+        std::cerr << "Failed to open /dev/net/tun\n";
+        return false;
+    }
+
+    struct ifreq ifr = {};
+    strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI | IFF_MULTI_QUEUE;  // Allows multiple processes to access
+
+    if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
+        std::cerr << "Failed to create TAP device " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to bring TAP device up: " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Assign a fixed MAC address (optional, but helpful for debugging)
+    cmd = "ip link set " + tapName + " address 02:00:00:00:00:01";  
+    std::system(cmd.c_str());  // Ignore errors here, since kernel may auto-assign
+
+    // If using a namespace, move it immediately
+    cmd = "ip link set " + tapName + " netns mynetns";
+    std::system(cmd.c_str());
+
+    std::cout << "Created TAP device: " << tapName << " in namespace mynetns" << std::endl;
+    return true;
+}
+
+////////////////////////////////////////////
+
+
 
 
