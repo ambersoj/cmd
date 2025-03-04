@@ -3847,3 +3847,89 @@ put in hud
 send 0 02:00:00:00:00:01 02:00:00:00:01:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
 send 0 86:a5:74:7d:36:1f 02:00:00:00:01:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
 
+////////////////////////////
+
+Ok, I've got this status now in my namespace:
+
+2: br0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:02:01 brd ff:ff:ff:ff:ff:ff
+34: hud0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UP mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:01:01 brd ff:ff:ff:ff:ff:ff
+37: cmd0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel master br0 state UP mode DEFAULT group default qlen 1000
+    link/ether 02:00:00:00:00:01 brd ff:ff:ff:ff:ff:ff
+
+and in wireshark I can see my ping from hud0 but it doesn't get to the cmd0.  And vice versa.
+
+Any ideas how to configure that brigde.  I'm triple checked how I address the hud and cmd I've enbabled port forwarding and I've tried addressing the bridge itself a little bit.
+
+///////////////////////////////////
+
+sudo ip netns exec mynetns bridge fdb show
+
+Whoa, I have way too many, don't I:
+
+root@PRED:/usr/local/cmd# sudo ip netns exec mynetns bridge fdb show
+33:33:00:00:00:01 dev br0 self permanent
+01:00:5e:00:00:6a dev br0 self permanent
+33:33:00:00:00:6a dev br0 self permanent
+01:00:5e:00:00:01 dev br0 self permanent
+33:33:ff:00:02:01 dev br0 self permanent
+02:00:00:00:02:01 dev br0 vlan 1 master br0 permanent
+02:00:00:00:02:01 dev br0 master br0 permanent
+02:00:00:00:01:01 dev hud0 vlan 1 master br0 permanent
+02:00:00:00:01:01 dev hud0 master br0 permanent
+33:33:00:00:00:01 dev hud0 self permanent
+01:00:5e:00:00:01 dev hud0 self permanent
+33:33:ff:00:01:01 dev hud0 self permanent
+02:00:00:00:00:01 dev cmd0 vlan 1 master br0 permanent
+02:00:00:00:00:01 dev cmd0 master br0 permanent
+33:33:00:00:00:01 dev cmd0 self permanent
+01:00:5e:00:00:01 dev cmd0 self permanent
+33:33:ff:00:00:01 dev cmd0 self permanent
+root@PRED:/usr/local/cmd# 
+
+//////////////////////////////////////////////
+
+When I do this:
+
+sudo ip netns exec mynetns tcpdump -i hud0 -e -n
+sudo ip netns exec mynetns tcpdump -i br0 -e -n
+sudo ip netns exec mynetns tcpdump -i cmd0 -e -n
+
+I see the frames in wireshark but not tcpdump from both hud0 and cmd0.
+
+///////////////////////////////////////////
+
+Hey partner.  I've been busy and I've discovered namespaces and I have our mpp components starting up in a namespace.  They're still not getting each other's pings though.
+
+However, while I've been testing it I've been concerned with just the transmit side of things.  But just recently I started checking the receive side of things by issuing >recv 0, our own command, remember?
+
+> recv 0
+Received packet: 
+> send 0 02:00:00:00:01:01 02:00:00:00:00:01 43
+Libnet initialized for cmd0
+ICMP Ping sent! (43 bytes)
+> recv 0
+Received packet: 02 00 00 00 01 01 02 00 00 00 00 01 08 00 45 00 00 1D 00 00 00 00 40 01 69 8B C0 A8 C8 01 C0 A8 C8 02 08 00 B0 2C 04 D2 00 01 43 
+
+This is in the cmd where it sent to 01 01, the hud.  But here it is with it's own MAC as the srcMac.
+
+Well, what I get comming back is like a loop back.  Is this possible to happen within the program?  Or in order for that to appear in the RxBuffer would it have had to hace come from the tap cmd0?  Do you remeber the cmd code well enough to tell if it would have been possible to accidentally program a loopback?  Or did you code one in on purpose?
+
+/////////////////////////////
+
+Is it possible that in reality a tap would have to be initialized all the way up to an IP level and then just put into tap mode after?
+
+I read this too:
+
+TAP Devices Naturally Loop Back Frames
+
+    TAP devices (unlike normal NICs) deliver all packets to the same program that writes to them.
+    If you send a packet through a TAP, it often comes back to your program unless filtered.
+
+What do you think of that?
+
+////////////////////////////////
+
+
+

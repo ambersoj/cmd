@@ -37,7 +37,7 @@ bool COM::initializeTAP() {
 
     struct ifreq ifr = {};
     strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
-    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI | IFF_MULTI_QUEUE;  // Allows multiple processes to access
 
     if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
         std::cerr << "Failed to create TAP device " << tapName << "\n";
@@ -53,7 +53,15 @@ bool COM::initializeTAP() {
         return false;
     }
 
-    std::cout << "Created TAP device: " << tapName << std::endl;
+    // Assign a fixed MAC address (optional, but helpful for debugging)
+    cmd = "ip link set " + tapName + " address 02:00:00:00:00:01";  
+    std::system(cmd.c_str());  // Ignore errors here, since kernel may auto-assign
+
+    // If using a namespace, move it immediately
+    cmd = "ip link set " + tapName + " netns mynetns";
+    std::system(cmd.c_str());
+
+    std::cout << "Created TAP device: " << tapName << " in namespace mynetns" << std::endl;
     return true;
 }
 
@@ -111,7 +119,7 @@ void COM::sendPing(std::shared_ptr<COM> com) {
     libnet_clear_packet(lnet);
 
     // 🏗 Build ICMP Packet
-    uint8_t payload[] = "ICMP PING TEST";
+    uint8_t payload[] = "C";
     uint32_t payloadSize = sizeof(payload) - 1;
 
     libnet_ptag_t icmpTag = libnet_build_icmpv4_echo(
