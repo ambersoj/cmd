@@ -58,12 +58,12 @@ Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
             return;
         }
 
-/*        int dceIndex = std::stoi(args[0]);
+        int dceIndex = std::stoi(args[0]);
         if (dceIndex < 0 || dceIndex >= comList.size()) {
             std::cerr << "Invalid DCE index." << std::endl;
             return;
         }
-*/
+
         std::array<uint8_t, 6> dstMac;
         std::array<uint8_t, 6> srcMac;
 
@@ -85,9 +85,12 @@ Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
         EthernetFrame frame(srcMac, dstMac, payload);
 
         // Now call transmitFrame() with the correct type
-//        comList[dceIndex]->transmitFrame(frame);
-        comList[0]->sendPing(comList[0]);
+        comList[dceIndex]->transmitFrame(frame);
         
+    });
+
+    addCommand("ping", [this](const std::vector<std::string>& args) {
+        comList[0]->sendPing(comList[0]);
     });
 
     addCommand("recv", [this](const std::vector<std::string>& args) {

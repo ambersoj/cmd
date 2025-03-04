@@ -15,6 +15,9 @@ COM::COM(const std::string& tapName, const std::string& macAddress)
     if (!initializeTAP()) {
         throw std::runtime_error("Failed to initialize TAP device " + tapName);
     }
+    if (!initializeTUN()) {
+        throw std::runtime_error("Failed to initialize TUN device " + tapName);
+    }
     if (!initializeLibnet()) {
         throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
     }
@@ -25,6 +28,48 @@ COM::COM(const std::string& tapName, const std::string& macAddress)
     startCapture();
 
     std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
+}
+
+// Initialize TUN device
+bool COM::initializeTUN() {
+    tapFd = open("/dev/net/tun", O_RDWR);
+    if (tapFd < 0) {
+        std::cerr << "Failed to open /dev/net/tun\n";
+        return false;
+    }
+
+    struct ifreq ifr = {};
+    strncpy(ifr.ifr_name, "cmd0", IFNAMSIZ);
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;  // Create TUN instead of TAP
+
+    if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
+        std::cerr << "Failed to create TUN device cmd0\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set cmd0 up";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to bring TUN device up: cmd0\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Assign an IP address (TUN devices do not have MAC addresses)
+    cmd = "ip addr add 10.0.0.1/24 dev cmd0";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to assign IP address to TUN device cmd0\n";
+        close(tapFd);
+        return false;
+    }
+
+    // If using a namespace, move it immediately
+    cmd = "ip link set cmd0 netns mynetns";
+    std::system(cmd.c_str());
+
+    std::cout << "Created TUN device: cmd0 with IP 10.0.0.1 in namespace mynetns" << std::endl;
+    return true;
 }
 
 // Initialize TAP device
@@ -113,8 +158,8 @@ void COM::sendPing(std::shared_ptr<COM> com) {
     uint8_t dstMac[6] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x01};
     uint8_t srcMac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
 
-    uint32_t srcIP = libnet_name2addr4(lnet, (char*)"192.168.200.1", LIBNET_DONT_RESOLVE);
-    uint32_t dstIP = libnet_name2addr4(lnet, (char*)"192.168.200.2", LIBNET_DONT_RESOLVE);
+    uint32_t srcIP = libnet_name2addr4(lnet, (char*)"10.0.0.1", LIBNET_DONT_RESOLVE);
+    uint32_t dstIP = libnet_name2addr4(lnet, (char*)"10.0.0.2", LIBNET_DONT_RESOLVE);
 
     libnet_clear_packet(lnet);
 

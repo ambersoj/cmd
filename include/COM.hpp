@@ -44,6 +44,8 @@ private:
     std::thread captureThread;
 
     bool initializeTAP();
+    bool initializeTUN();
+
     bool initializeLibnet();
     bool initializePcap();
 
