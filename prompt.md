@@ -4499,6 +4499,9 @@ const std::string& Command::getName() const {
 
 /////////////////////////////////////////////////
 
+std::vector<uint8_t> packet = comList[dceIndex]->getNextPacket();
 
+std::vector<uint8_t> getNextPacket();
 
-
+std::vector<uint8_t> COM::getNextPacket() {
+std::vector<uint8_t> packet = rxBuffer.front();
