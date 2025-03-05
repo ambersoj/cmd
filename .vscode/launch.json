@@ -5,10 +5,11 @@
             "name": "Debug (g++ - Build and Debug active file)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/cmd",
+            "program": "/usr/local/cmd_clone/cmd/cmd",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "justMyCode": false,
+            "cwd": "/usr/local/cmd_clone/cmd/",
             "environment": [],
             "externalConsole": false,  // Use the integrated terminal instead of an external console
             "MIMode": "gdb",
@@ -25,8 +26,8 @@
             "filterStdout": true,
             "filterStderr": true,
             "sourceFileMap": {
-                "/usr/local/cmd/src": "${workspaceFolder}/src",
-                "/usr/local/cmd/include": "${workspaceFolder}/include"
+                "/usr/local/cmd/src": "/usr/local/cmd_clone/cmd/src",
+                "/usr/local/cmd/include": "/usr/local/cmd_clone/cmd/include"
             }
         }
     ]
