@@ -14,7 +14,6 @@ private:
 
 public:
     void update(const std::vector<uint8_t>& packet) override;
-    std::vector<uint8_t> getNextPacket();
 };
 
 #endif // RXOBSERVER_HPP

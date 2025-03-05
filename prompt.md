@@ -3974,6 +3974,531 @@ bool COM::initializeTAP() {
 
 ////////////////////////////////////////////
 
+Thanks for the code.  In a little while I'm going to ask you to do the same thing but for a different device and a differnet IP.  I made a git branch to do this work.  On one branch I'm going to run that code you just made.  I want to clone that branch to make another tun with a different IP.  How do I clone my branch?  The repo is this:
+
+https://github.com/ambersoj/cmd
+
+and my branch is:
+test_tun_ip_config
+
+//////////////////////////////////////////
+
+Here's a chunk of my code base for a module I call cmd or Cmd or CMD depending on context.  I hope you can see how it takes commands and how it has a COM with libnet and pcap and tuns and taps.  I've just recently added the ping commands as you can see in the code below in Cmd.cpp and Cmd.hpp.  Now that I have both tuns and taps, however, I'll need to refactor because now libnet needs to be initialized per transaction now that there are both tuns and taps because they initialize with either LIBNET_LINK for tap or LIBNET_RAW4 for tun.  I'd like for you to refactor so that the constructor will look for either "tun" or "tap" somewhere in the tapName to select either the initializeTap() followed by initializeLibnet() for ethernet, or initializeTUN() followed by initializeLibnet() for IPv4.  I don't know how you want to do it.  If you want to pass the link type into libnet so it can decide at the time (LIBNET_LINK vs. LIBNET_RAW4) how to initialize.  Right now it takes no arguments.  Or maybe you will just spilt initializeLibnet() into initializeLibnetForEthernet() and initializeLibnetForIP().
+
+// main.cpp
+int main() {
+    try {
+        enterNamespace("mynetns");
+
+        // Initialize COM instances for CMD
+        std::vector<std::shared_ptr<COM>> coms;
+        coms.push_back(std::make_shared<COM>("cmd0", "02:00:00:00:00:01"));
+/*        coms.push_back(std::make_shared<COM>("cmd1", "02:00:00:00:00:02"));
+        coms.push_back(std::make_shared<COM>("cmd2", "02:00:00:00:00:03"));
+        coms.push_back(std::make_shared<COM>("cmd3", "02:00:00:00:00:04"));
+        coms.push_back(std::make_shared<COM>("cmd4", "02:00:00:00:00:05"));
+        coms.push_back(std::make_shared<COM>("cmd5", "02:00:00:00:00:06"));
+*/
+        // Initialize command interface
+        Cmd cmd(coms);
+        
+        // Run the command loop
+        cmd.run();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+    
+    return 0;
+}
+
+// Cmd.hpp
+class Cmd {
+public:
+    explicit Cmd(std::vector<std::shared_ptr<COM>>& coms);
+    void addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func);
+    void run();
+    void executeCommand(const std::string& input);
+    std::vector<std::shared_ptr<COM>> getComList() { return comList; }
+
+private:
+    std::unordered_map<std::string, Command> commands;
+    std::vector<std::shared_ptr<COM>> comList;
+
+};
+
+// Cmd.cpp
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (std::getline(iss, token, ' ')) {
+        if (!token.empty()) {
+            if (token.front() == '"' && !inQuotes) {
+                inQuotes = true;
+                quotedString = token.substr(1);
+            } else if (token.back() == '"' && inQuotes) {
+                inQuotes = false;
+                quotedString += " " + token.substr(0, token.length() - 1);
+                args.push_back(quotedString);
+            } else if (inQuotes) {
+                quotedString += " " + token;
+            } else {
+                args.push_back(token);
+            }
+        }
+    }
+    return args;
+}
+
+void parseMacAddress(const std::string& macStr, std::array<uint8_t, 6>& dstMac) {
+    std::stringstream ss(macStr);
+    std::string byte;
+    int i = 0;
+
+    while (std::getline(ss, byte, ':')) {
+        if (i >= 6) {
+            throw std::runtime_error("Invalid MAC address format.");
+        }
+        dstMac[i++] = static_cast<uint8_t>(std::stoi(byte, nullptr, 16));
+    }
+
+    if (i != 6) {
+        throw std::runtime_error("Incomplete MAC address.");
+    }
+}
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
+
+    std::cout << "Cmd initialized with existing COM instances.\n";
+
+    // Register built-in commands
+    addCommand("send", [this](const std::vector<std::string>& args) {
+        if (args.size() < 4) {  // 6 bytes src MAC, 6 bytes dst MAC, at least 1-byte payload
+            std::cerr << "Usage: send <dce_index> <dst_mac> <src_mac> <hex_data...>" << std::endl;
+            return;
+        }
+
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+
+        std::array<uint8_t, 6> dstMac;
+        std::array<uint8_t, 6> srcMac;
+
+        // Parse destination MAC
+        parseMacAddress(args[1], dstMac);
+
+        // Parse source MAC
+        parseMacAddress(args[2], srcMac);
+
+        std::vector<uint8_t> payload;
+        std::stringstream ss(args[3]);
+        std::string byte;
+
+        while (std::getline(ss, byte, ':')) {
+            payload.push_back(static_cast<uint8_t>(std::stoi(byte, nullptr, 16)));
+        }
+
+        // Construct the EthernetFrame correctly
+        EthernetFrame frame(srcMac, dstMac, payload);
+
+        // Now call transmitFrame() with the correct type
+        comList[dceIndex]->transmitFrame(frame);
+        
+    });
+
+    addCommand("ping", [this](const std::vector<std::string>& args) {
+        comList[0]->sendPing(comList[0]);
+    });
+
+    addCommand("recv", [this](const std::vector<std::string>& args) {
+        if (args.empty()) {
+            std::cerr << "Usage: recv <dce_index>" << std::endl;
+            return;
+        }
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+        std::vector<uint8_t> packet = comList[dceIndex]->getNextPacket();
+        std::cout << "Received packet: ";
+        for (uint8_t byte : packet) {
+            printf("%02X ", byte);
+        }
+        std::cout << std::endl;
+    });
+}
+
+void Cmd::addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func) {
+    commands.emplace(name, Command(name, func));
+}
+
+void Cmd::executeCommand(const std::string& input) {
+    std::vector<std::string> args = parseCommand(input);
+
+    if (args.empty()) {
+        std::cerr << "Error: Empty command string" << std::endl;
+        return;
+    }
+
+    std::string commandName = args[0];  // First argument is the command name
+    auto it = commands.find(commandName);
+    if (it != commands.end()) {
+        args.erase(args.begin());  // Remove command name from args before passing
+        it->second.execute(args);
+    } else {
+        std::cerr << "Command not found: " << commandName << std::endl;
+    }
+}
+
+void Cmd::run() {
+    std::cout << "Cmd loop running... Type 'exit' to quit." << std::endl;
+    std::string input;
+    while (true) {
+        std::cout << "> ";
+        std::getline(std::cin, input);
+        if (input == "exit") break;
+        executeCommand(input);
+    }
+}
+
+// COM.hpp
+class COM {
+public:
+    COM(const std::string& tapName, const std::string& macAddress);
+
+    void transmitFrame(const EthernetFrame& frame);  // Updated signature
+    void sendPing(std::shared_ptr<COM> com);
+
+    void attach(std::shared_ptr<IObserver> observer);
+    void detach(std::shared_ptr<IObserver> observer);
+    void notify(const std::vector<uint8_t>& packet);
+
+    void startCapture();
+    void stopCapture();
+
+    std::vector<uint8_t> getNextPacket();
+    std::string getMacAddress() const;
+    libnet_t* getLibnetHandle() {return lnet;}
+private:
+    int tapFd;
+    std::string tapName;
+    std::string macAddress;
+    pcap_t* pcapHandle;
+    libnet_t* lnet;
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    std::queue<std::vector<uint8_t>> rxBuffer;
+    std::mutex bufferMutex;
+    std::vector<std::shared_ptr<IObserver>> observers;
+    bool running;
+    std::thread captureThread;
+
+    bool initializeTAP();
+    bool initializeTUN();
+
+    bool initializeLibnet();
+    bool initializePcap();
+
+    static void packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
+
+    static void getNextPacket(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
+};
+
+// COM.cpp
+COM::COM(const std::string& tapName, const std::string& macAddress)
+    : tapName(tapName), macAddress(macAddress), tapFd(-1), lnet(nullptr), pcapHandle(nullptr) {
+
+    if (!initializeTAP()) {
+        throw std::runtime_error("Failed to initialize TAP device " + tapName);
+    }
+    if (!initializeTUN()) {
+        throw std::runtime_error("Failed to initialize TUN device " + tapName);
+    }
+    if (!initializeLibnet()) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+    if (!initializePcap()) {
+        throw std::runtime_error("Failed to initialize pcap for " + tapName);
+    }
+
+    startCapture();
+
+    std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
+}
+
+// Initialize TUN device
+bool COM::initializeTUN() {
+    tapFd = open("/dev/net/tun", O_RDWR);
+    if (tapFd < 0) {
+        std::cerr << "Failed to open /dev/net/tun\n";
+        return false;
+    }
+
+    struct ifreq ifr = {};
+    strncpy(ifr.ifr_name, "cmd0", IFNAMSIZ);
+    ifr.ifr_flags = IFF_TUN | IFF_NO_PI | IFF_MULTI_QUEUE;  // Create TUN instead of TAP
+
+    if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
+        std::cerr << "Failed to create TUN device cmd0\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set cmd0 up";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to bring TUN device up: cmd0\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Assign an IP address (TUN devices do not have MAC addresses)
+    cmd = "ip addr add 10.0.0.1/24 dev cmd0";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to assign IP address to TUN device cmd0\n";
+        close(tapFd);
+        return false;
+    }
+
+    // If using a namespace, move it immediately
+    cmd = "ip link set cmd0 netns mynetns";
+    std::system(cmd.c_str());
+
+    std::cout << "Created TUN device: cmd0 with IP 10.0.0.1 in namespace mynetns" << std::endl;
+    return true;
+}
+
+// Initialize TAP device
+bool COM::initializeTAP() {
+    tapFd = open("/dev/net/tun", O_RDWR);
+    if (tapFd < 0) {
+        std::cerr << "Failed to open /dev/net/tun\n";
+        return false;
+    }
+
+    struct ifreq ifr = {};
+    strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI | IFF_MULTI_QUEUE;  // Allows multiple processes to access
+
+    if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
+        std::cerr << "Failed to create TAP device " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to bring TAP device up: " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Assign a fixed MAC address (optional, but helpful for debugging)
+    cmd = "ip link set " + tapName + " address 02:00:00:00:00:01";  
+    std::system(cmd.c_str());  // Ignore errors here, since kernel may auto-assign
+
+    // If using a namespace, move it immediately
+    cmd = "ip link set " + tapName + " netns mynetns";
+    std::system(cmd.c_str());
+
+    std::cout << "Created TAP device: " << tapName << " in namespace mynetns" << std::endl;
+    return true;
+}
+
+// Initialize libnet
+bool COM::initializeLibnet() {
+    lnet = libnet_init(LIBNET_RAW4, tapName.c_str(), errbuf);
+    if (!lnet) {
+        std::cerr << "Libnet init failed for " << tapName << ": " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Libnet initialized for " << tapName << "\n";
+    return true;
+}
+
+// Initialize pcap
+bool COM::initializePcap() {
+    pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+    if (!pcapHandle) {
+        std::cerr << "Failed to initialize pcap: " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Pcap initialized for " << tapName << "\n";
+    return true;
+}
+
+void COM::transmitFrame(const EthernetFrame& frame) {
+    libnet_clear_packet(lnet);
+
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+}
+
+void COM::sendPing(std::shared_ptr<COM> com) {
+    initializeLibnet();
+    libnet_t* lnet = com->getLibnetHandle();  // Get libnet handle from COM
+
+    uint8_t dstMac[6] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x01};
+    uint8_t srcMac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+
+    uint32_t srcIP = libnet_name2addr4(lnet, (char*)"10.0.0.1", LIBNET_DONT_RESOLVE);
+    uint32_t dstIP = libnet_name2addr4(lnet, (char*)"10.0.0.2", LIBNET_DONT_RESOLVE);
+
+    libnet_clear_packet(lnet);
+
+    // 🏗 Build ICMP Packet
+    uint8_t payload[] = "C";
+    uint32_t payloadSize = sizeof(payload) - 1;
+
+    libnet_ptag_t icmpTag = libnet_build_icmpv4_echo(
+        8, 0, 0, 1234, 1,  // Type, Code, Checksum, ID, Sequence
+        payload, payloadSize,
+        lnet, 0
+    );
+    if (icmpTag == -1) {
+        throw std::runtime_error("ICMP build error: " + std::string(libnet_geterror(lnet)));
+    }
+
+    // 🏗 Build IP Header
+    libnet_ptag_t ipTag = libnet_build_ipv4(
+        LIBNET_IPV4_H + LIBNET_ICMPV4_ECHO_H + payloadSize, 
+        0, 0, 0, 64, IPPROTO_ICMP, 0, srcIP, dstIP,
+        NULL, 0, lnet, 0
+    );
+    if (ipTag == -1) {
+        throw std::runtime_error("IP build error: " + std::string(libnet_geterror(lnet)));
+    }
+
+    // Construct Ethernet Frame
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        dstMac, srcMac,
+        ETHERTYPE_IP, NULL, 0,
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        std::cerr << "Error building Ethernet packet: " << libnet_geterror(lnet) << std::endl;
+        return;
+    }
+
+    // Send packet
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send ICMP Ping: " + std::string(libnet_geterror(lnet)));
+    }
+
+    std::cout << "ICMP Ping sent! (" << bytesWritten << " bytes)" << std::endl;
+}
+
+void COM::attach(std::shared_ptr<IObserver> observer) {
+    observers.push_back(observer);
+}
+
+void COM::detach(std::shared_ptr<IObserver> observer) {
+    observers.erase(std::remove_if(observers.begin(), observers.end(),
+    [&observer](const std::shared_ptr<IObserver>& o) { return o == observer; }),
+    observers.end());
+}
+
+void COM::notify(const std::vector<uint8_t>& packet) {
+    for (auto& observer : observers) {
+        observer->update(packet);
+    }
+}
+
+void COM::startCapture() {
+    running = true;
+    captureThread = std::thread([this]() {
+        pcap_loop(pcapHandle, 0, packetHandler, reinterpret_cast<u_char*>(this));
+    });
+}
+
+void COM::stopCapture() {
+    running = false;
+    pcap_breakloop(pcapHandle);
+    if (captureThread.joinable()) {
+        captureThread.join();
+    }
+}
+
+void COM::packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
+    COM* comInstance = reinterpret_cast<COM*>(userData);
+    
+    std::vector<uint8_t> packetData(packet, packet + pkthdr->caplen);
+
+    {
+        std::lock_guard<std::mutex> lock(comInstance->bufferMutex);
+        comInstance->rxBuffer.push(packetData);
+    }
+
+    comInstance->notify(packetData);
+}
+
+std::vector<uint8_t> COM::getNextPacket() {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    if (!rxBuffer.empty()) {
+        std::vector<uint8_t> packet = rxBuffer.front();
+        rxBuffer.pop();
+        return packet;
+    }
+    return {}; // Return empty if no packets available
+}
+
+std::string COM::getMacAddress() const {
+    return macAddress;
+}
+
+// Command.hpp
+using CommandFunction = std::function<void(const std::vector<std::string>&)>;
+
+class Command {
+public:
+    Command(const std::string& name, CommandFunction func);
+    void execute(const std::vector<std::string>& args) const;
+    const std::string& getName() const;
+
+private:
+    std::string name;
+    CommandFunction func;
+};
+
+#endif // COMMAND_HPP
+
+// Command.cpp
+Command::Command(const std::string& name, CommandFunction func)
+    : name(name), func(func) {}
+
+void Command::execute(const std::vector<std::string>& args) const {
+    func(args);
+}
+
+const std::string& Command::getName() const {
+    return name;
+}
+
+/////////////////////////////////////////////////
+
 
 
 

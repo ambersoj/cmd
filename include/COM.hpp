@@ -46,12 +46,15 @@ private:
     bool initializeTAP();
     bool initializeTUN();
 
-    bool initializeLibnet();
+    bool initializeLibnetForEthernet();
+    bool initializeLibnetForIp();
+    
     bool initializePcap();
+
+    std::vector<uint8_t> getNextPacket();
 
     static void packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
 
-    static void getNextPacket(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
 };
 
 #endif // COM_HPP

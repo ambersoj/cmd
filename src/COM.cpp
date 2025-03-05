@@ -11,23 +11,10 @@
 // Constructor
 COM::COM(const std::string& tapName, const std::string& macAddress)
     : tapName(tapName), macAddress(macAddress), tapFd(-1), lnet(nullptr), pcapHandle(nullptr) {
-
-    if (!initializeTAP()) {
-        throw std::runtime_error("Failed to initialize TAP device " + tapName);
-    }
-    if (!initializeTUN()) {
-        throw std::runtime_error("Failed to initialize TUN device " + tapName);
-    }
-    if (!initializeLibnet()) {
-        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
-    }
-    if (!initializePcap()) {
-        throw std::runtime_error("Failed to initialize pcap for " + tapName);
-    }
+    
+    initializePcap();
 
     startCapture();
-
-    std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
 }
 
 // Initialize TUN device
@@ -111,7 +98,17 @@ bool COM::initializeTAP() {
 }
 
 // Initialize libnet
-bool COM::initializeLibnet() {
+bool COM::initializeLibnetForIp() {
+    lnet = libnet_init(LIBNET_RAW4, tapName.c_str(), errbuf);
+    if (!lnet) {
+        std::cerr << "Libnet init failed for " << tapName << ": " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Libnet initialized for " << tapName << "\n";
+    return true;
+}
+
+bool COM::initializeLibnetForEthernet() {
     lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
     if (!lnet) {
         std::cerr << "Libnet init failed for " << tapName << ": " << errbuf << "\n";
@@ -133,6 +130,12 @@ bool COM::initializePcap() {
 }
 
 void COM::transmitFrame(const EthernetFrame& frame) {
+    initializeTUN();
+    initializeLibnetForEthernet();
+    initializePcap();
+
+    startCapture();
+  
     libnet_clear_packet(lnet);
 
     libnet_ptag_t ethernetTag = libnet_build_ethernet(
@@ -152,7 +155,12 @@ void COM::transmitFrame(const EthernetFrame& frame) {
 }
 
 void COM::sendPing(std::shared_ptr<COM> com) {
-    initializeLibnet();
+    initializeTUN();
+    initializeLibnetForIp();
+    initializePcap();
+
+    startCapture();
+
     libnet_t* lnet = com->getLibnetHandle();  // Get libnet handle from COM
 
     uint8_t dstMac[6] = {0x02, 0x00, 0x00, 0x00, 0x01, 0x01};
@@ -187,7 +195,7 @@ void COM::sendPing(std::shared_ptr<COM> com) {
     }
 
     // Construct Ethernet Frame
-    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+/*    libnet_ptag_t ethernetTag = libnet_build_ethernet(
         dstMac, srcMac,
         ETHERTYPE_IP, NULL, 0,
         lnet, 0
@@ -197,7 +205,7 @@ void COM::sendPing(std::shared_ptr<COM> com) {
         std::cerr << "Error building Ethernet packet: " << libnet_geterror(lnet) << std::endl;
         return;
     }
-
+*/
     // Send packet
     int bytesWritten = libnet_write(lnet);
     if (bytesWritten == -1) {
@@ -238,6 +246,16 @@ void COM::stopCapture() {
     }
 }
 
+std::vector<uint8_t> COM::getNextPacket() {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    if (!rxBuffer.empty()) {
+        std::vector<uint8_t> packet = rxBuffer.front();
+        rxBuffer.pop();
+        return packet;
+    }
+    return {}; // Return empty if no packets available
+}
+
 void COM::packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
     COM* comInstance = reinterpret_cast<COM*>(userData);
     
@@ -249,16 +267,6 @@ void COM::packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, cons
     }
 
     comInstance->notify(packetData);
-}
-
-std::vector<uint8_t> COM::getNextPacket() {
-    std::lock_guard<std::mutex> lock(bufferMutex);
-    if (!rxBuffer.empty()) {
-        std::vector<uint8_t> packet = rxBuffer.front();
-        rxBuffer.pop();
-        return packet;
-    }
-    return {}; // Return empty if no packets available
 }
 
 std::string COM::getMacAddress() const {
