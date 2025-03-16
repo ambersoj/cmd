@@ -136,11 +136,12 @@ void run(std::unordered_map<int, UDPChannel>& channels) {
         while (iss >> token) tokens.push_back(token);
         
         if (tokens.empty()) continue;
-        if (tokens[0] == "send" && tokens.size() == 5) {
+        if (tokens[0] == "send" && tokens.size() >= 5) {
             int ch = std::stoi(tokens[1]);
             if (channels.find(ch) != channels.end()) {
                 int dst_port = std::stoi(tokens[3]);
-                SendCommand cmd(channels[ch], tokens[2], dst_port, tokens[4]);
+                std::string message = line.substr(line.find(tokens[4])); // Capture full message including spaces
+                SendCommand cmd(channels[ch], tokens[2], dst_port, message);
                 cmd.execute();
             } else {
                 std::cerr << "Invalid channel: " << ch << std::endl;

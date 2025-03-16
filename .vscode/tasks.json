@@ -7,9 +7,9 @@
             "command": "/usr/bin/g++",
             "args": [
                 "-g",
-                "${workspaceFolder}/gptcmd.cpp",
+                "${workspaceFolder}/cmd.cpp",
                 "-o",
-                "${workspaceFolder}/gptcmd",
+                "${workspaceFolder}/cmd",
             ],
             "group": {
                 "kind": "build",

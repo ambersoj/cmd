@@ -4246,7 +4246,15 @@ Great work.  Thanks for the code.
 
 Ok, now that we've figured out this thing all the way through we have the proof of concept a lot further along, wouldn't you say?  And that's just absolutely great and I'm very happy about this.
 
-I have a question though.  I changed the message to "Hello Graham!!!" and then it said the >send command was invalid, because it took Graham!!! as an argument.  Is there a way I can put spaces in the message?  Like an escape sequence or something?
+I have a question though.  I changed the message to "Hello Graham!!!" and then it said the >send command was invalid, because it took Graham!!! as an argument.  Is there a way I can put spaces in the message?  Like an escape sequence or something?  If not it's ok, I'll just use dashes or an underscore or something.
 
+I have this current well working program commited and pushed to github in a repo branch:
+
+https://github.com/ambersoj/cmd/tree/tcp_icp
+
+The local working directory for that branch is /usr/local/cmd_clone/cmd and I'd like to clone it to /usr/local/hud_clone/hud.  Then I want to customize it by changing references to cmd to hud and changing the IP ranges and then try to communicate with the send and recv commands between the two separately running programs, and that, partner, will be our IPC.
 
 /////////////////////////////////////////////////////
+
+
+
