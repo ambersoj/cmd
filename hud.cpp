@@ -3,10 +3,15 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <queue>
 #include <cstring>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <poll.h>
+#include <cstdlib>
+
+#define PORT_BASE 6000  // Change this to 6000 for hud, etc.
 
 class UDPChannel {
 public:
@@ -28,11 +33,9 @@ public:
         std::cout << "UDPChannel bound to " << ip << ":" << port << " with sockfd " << sockfd << std::endl;
     }
 
-    // Delete copy constructor and assignment operator to prevent copying
     UDPChannel(const UDPChannel&) = delete;
     UDPChannel& operator=(const UDPChannel&) = delete;
 
-    // Allow move semantics
     UDPChannel(UDPChannel&& other) noexcept
         : sockfd(other.sockfd), ip(std::move(other.ip)), port(other.port) {
         other.sockfd = -1;
@@ -116,55 +119,81 @@ public:
     void execute() override {
         std::string msg = channel.recv();
         if (!msg.empty()) std::cout << "Received: " << msg << std::endl;
-        else std::cout << "No data available" << std::endl;
+        else std::cout << "> No data available" << std::endl;
     }
     
 private:
     UDPChannel& channel;
 };
 
-void run(std::unordered_map<int, UDPChannel>& channels) {
-    std::string line;
+class CommandInvoker {
+public:
+    void addCommand(Command* cmd) {
+        commandQueue.push(cmd);
+    }
+    
+    void executeCommands() {
+        while (!commandQueue.empty()) {
+            Command* cmd = commandQueue.front();
+            commandQueue.pop();
+            cmd->execute();
+            std::cout << "> ";
+            delete cmd;
+        }
+    }
+    
+private:
+    std::queue<Command*> commandQueue;
+};
+
+void run(std::unordered_map<int, UDPChannel>& channels, CommandInvoker& invoker) {
+    struct pollfd pfd = { STDIN_FILENO, POLLIN, 0 };
+    std::cout << "> ";
     while (true) {
-        std::cout << "> ";
-        std::getline(std::cin, line);
-        if (line == "exit") break;
-        
-        std::vector<std::string> tokens;
-        std::istringstream iss(line);
-        std::string token;
-        while (iss >> token) tokens.push_back(token);
-        
-        if (tokens.empty()) continue;
-        if (tokens[0] == "send" && tokens.size() >= 5) {
-            int ch = std::stoi(tokens[1]);
-            if (channels.find(ch) != channels.end()) {
-                int dst_port = std::stoi(tokens[3]);
-                std::string message = line.substr(line.find(tokens[4])); // Capture full message including spaces
-                SendCommand cmd(channels[ch], tokens[2], dst_port, message);
-                cmd.execute();
+//        std::cout << "> ";
+        std::cout.flush();
+        invoker.executeCommands();
+        if (poll(&pfd, 1, 100) > 0) {
+            std::string line;
+            std::getline(std::cin, line);
+            if (line == "exit") break;
+            
+            std::vector<std::string> tokens;
+            std::istringstream iss(line);
+            std::string token;
+            while (iss >> token) tokens.push_back(token);
+            
+            if (tokens.empty()) continue;
+            if (tokens[0] == "send" && tokens.size() >= 5) {
+                int ch = std::stoi(tokens[1]);
+                if (channels.find(ch) != channels.end()) {
+                    int dst_port = std::stoi(tokens[3]);
+                    std::string message = line.substr(line.find(tokens[4]));
+                    invoker.addCommand(new SendCommand(channels[ch], tokens[2], dst_port, message));
+                } else {
+                    std::cerr << "> Invalid channel: " << ch << std::endl;
+                }
+            } else if (tokens[0] == "recv" && tokens.size() == 2) {
+                int ch = std::stoi(tokens[1]);
+                if (channels.find(ch) != channels.end()) {
+                    invoker.addCommand(new RecvCommand(channels[ch]));
+                } else {
+                    std::cerr << "> Invalid channel: " << ch << std::endl;
+                }
             } else {
-                std::cerr << "Invalid channel: " << ch << std::endl;
+                std::cout << "> Invalid command" << std::endl;
             }
-        } else if (tokens[0] == "recv" && tokens.size() == 2) {
-            int ch = std::stoi(tokens[1]);
-            if (channels.find(ch) != channels.end()) {
-                RecvCommand cmd(channels[ch]);
-                cmd.execute();
-            } else {
-                std::cerr << "Invalid channel: " << ch << std::endl;
-            }
-        } else {
-            std::cout << "Invalid command" << std::endl;
         }
     }
 }
 
 int main() {
+    int base_port = PORT_BASE;
     std::unordered_map<int, UDPChannel> channels;
+    CommandInvoker invoker;
     for (int i = 0; i < 6; ++i) {
-        channels.emplace(i, UDPChannel("127.0.0.1", 5000 + i));
+        channels.emplace(i, UDPChannel("127.0.0.1", base_port + i));
     }
-    run(channels);
+    run(channels, invoker);
     return 0;
 }

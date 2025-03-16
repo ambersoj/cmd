@@ -7,9 +7,9 @@
             "command": "/usr/bin/g++",
             "args": [
                 "-g",
-                "${workspaceFolder}/cmd.cpp",
+                "${workspaceFolder}/hud.cpp",
                 "-o",
-                "${workspaceFolder}/cmd",
+                "${workspaceFolder}/hud",
             ],
             "group": {
                 "kind": "build",

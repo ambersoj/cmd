@@ -4256,5 +4256,41 @@ The local working directory for that branch is /usr/local/cmd_clone/cmd and I'd 
 
 /////////////////////////////////////////////////////
 
+Is the getline() method in run() blocking?  I'm curious because the vast majority of the time it will be my programs that issue the send and recv commands and not a user.  Will it be easy to add the hud-specific functionality to the cmd clone that makes up the current state of hud, just with the name changed and the port range starting at 6000 instead of cmd's 5000.  Suggest how you'd go about adding application specific functionality to the cmd core that will be used in all of the other components like hud but also cnl and net.  I just want to make sure that the program doesn't spend very much time waiting for user input because usually the user is a computer process.
+
+////////////////////////////////////
+
+ Oh darn now there's an issue with the prompt character '>' getting printed out every round:  
+ 
+ UDPChannel bound to 127.0.0.1:6000 with sockfd 3 UDPChannel bound to 127.0.0.1:6001 with sockfd 4 UDPChannel bound to 127.0.0.1:6002 with sockfd 5 UDPChannel bound to 127.0.0.1:6003 with sockfd 6 UDPChannel bound to 127.0.0.1:6004 with sockfd 7 UDPChannel bound to 127.0.0.1:6005 with sockfd 8 > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > e> > x> > i> > t>  [1] + Done                       "/usr/bin/gdb" --interpreter=mi --tty=${DbgTerm} 0<"/tmp/Microsoft-MIEngine-In-u0mgqrpe.3ph" 1>"/tmp/Microsoft-MIEngine-Out-3rratmlj.xbb" root@PRED:/usr/local/hud_clone/hud#
+ 
+Also, for now I don't want to run these programs from a script so I don't want to use an environment variable and for now I'd like to just set a PORT_BASE #define macro, if that's possible.  And none of the characters within the programs need to be changed, just the file name so sed never needs to be used, acutally.  It's really really easy to change from cmd to any of the other components, so that's a plus for sure. 
+
+////////////////////////////////////////////////
+
+It's very close now but the prompt character is initially missing, while the command is being entered, and then only shows up infront of the program output as shown below:
+
+UDPChannel bound to 127.0.0.1:6005 with sockfd 8
+send 0 127.0.0.1 5001 Hello cmd, from hud!!!
+> Sending to 127.0.0.1:5001 via socket 3
+send 0 127.0.0.1 5001 Hello cmd, from hud!!!
+> Sending to 127.0.0.1:5001 via socket 3
+
+///////////////////////////////////////////
+
+Now with regards to how commands will be most often issued through programs than through user input.  How would you feel about refactoring to use a GoF command pattern complete with a commandInvoker class or a commandInvoker() method that would perform all of the execute() methods of each command in commands?  Would adding an invoker like the GoF Command pattern achieve what we're looking for by way of an entry point for programatically issued commands?
+
+////////////////////////////////////////////////////
+
+See the output log here:
+
+UDPChannel bound to 127.0.0.1:6005 with sockfd 8
+> > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > > e> > > x> > > i> > t> > 
+[1] + Done                       "/usr/bin/gdb" --interpreter=mi --tty=${DbgTerm} 0<"/tmp/Microsoft-MIEngine-In-k3jhgjnn.les" 1>"/tmp/Microsoft-MIEngine-Out-gmoxunnq.vzw"
+root@PRED:/usr/local/hud_clone/hud# 
+
+It clearly prints the '>' prompt over and over.  At the end you can see how it even mixes in the letters of the command "exit".
+
+//////////////////////////////////////////
 
 
