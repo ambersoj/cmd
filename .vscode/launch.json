@@ -5,7 +5,7 @@
             "name": "Debug (g++ - Build and Debug active file)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/cmd",
+            "program": "${workspaceFolder}/gptcmd",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
@@ -25,8 +25,7 @@
             "filterStdout": true,
             "filterStderr": true,
             "sourceFileMap": {
-                "/usr/local/cmd/src": "${workspaceFolder}/src",
-                "/usr/local/cmd/include": "${workspaceFolder}/include"
+                "/usr/local/cmd_clone/cmd": "${workspaceFolder}",
             }
         }
     ]
