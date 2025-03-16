@@ -3056,11 +3056,1213 @@ skips over the payload handling.  What it wants for data to transmit which is:
 
 arg[3] = "48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21"
 
+<<<<<<< HEAD
 ////////////////
 
 This is a cool system, partner.  Thanks for the help.  I couldn't have done this without you.
 
 I can see the frames being transmitted on wireshark with this command:
+=======
+////////////////////////////////
+
+I'd like to familiarize you with my code base, which is fairly small... it's basically an Observer pattern to receive ethernet and a command pattern to issue commands such as send and recv and when the send command is issued send ethernet.  When I transfer the code over to you hopefully the intent will be clear.  There are 13 files all together, 7 .hpp files and 6 .cpp files, but most of the action happens in main.cpp, COM.cpp and Cmd.cpp.  I guess I've been inadvertently trialing my own program recently while trying to get the linux tun/tap working for my IPC and so I think not only will I want you to work on refactoring for this program to use TCP IPC in place of the linux tap ethernet I'd hoped to but also I think there will need to be a new strategy for other things such as the creation of sockets instead of taps, the initialization of things such as sockets, libnet, pcap etc.  Also, I don't know why or how the method getNextPacket() got into COM.hpp and so I'd like you also to reconcile with the getNextPacket() in RxObserver.  You may as well investigate what the method packetHandler() in COM.hpp is for too.
+
+Before I send the code to you though I'd like us to discuss this project a bit and refine our requirements and take stock of what we got.
+
+This program I call Cmd and it's just one of of four components that make up the whole project called mpp.  The Cmd, however, in its current state will be common among all the other components and then the plan is that all of the 4 components then specialize in one thing, and the Cmd module goes on to specialize as a command mechanism, the details of which aren't important now.  One I have the Cmd module working up to a certain level of funcionality I'll then clone it into the other components' repos.  But for now I'd like to get this Cmd component kitted out with the simple Command pattern command mechanism including a tx command, send, and the Observer pattern for the receiver and the command recv.  I want the Cmd component to have 6 TCP channels now, instead of the tun/tap channels, and act like DTE/DCE pairs so that each of the 4 components can configure a full-duplex DTE/DCE relationship with the neighboring components.  I don't want any kind of flow control, no handshaking, just fire-and-forget, if that's possible.  I want it to be reckless and for all the responsibilities to be passed to future higher levels of software which can implement the send and recv commands appropriately to acheive the communications desired.
+
+How would you like to receive the files?  Even though there are 13 files there isn't very much data to transfer and I could do it all in chat in a single transfer just by separating the files with // filename.xxx
+or something.  Or maybe you'd prefer using the + button and doing an upload, but since I'm not a paying user I might be severely limited in that mechanism.
+
+This should be lots of fun, partner.  If we can work quickly, before our session get too old and slow and sluggish maybe we'll go on to work on integrating all the 4 components.
+
+////////////////////////////////////////////////////
+
+// main.cpp
+
+int main() {
+    try {
+        // Initialize DCE instances
+        std::vector<std::shared_ptr<COM>> coms;
+        coms.push_back(std::make_shared<COM>("tap0", "00:11:22:33:44:00"));
+        coms.push_back(std::make_shared<COM>("tap1", "00:11:22:33:44:01"));
+        coms.push_back(std::make_shared<COM>("tap2", "00:11:22:33:44:02"));
+        coms.push_back(std::make_shared<COM>("tap3", "00:11:22:33:44:03"));
+        coms.push_back(std::make_shared<COM>("tap4", "00:11:22:33:44:04"));
+        coms.push_back(std::make_shared<COM>("tap5", "00:11:22:33:44:05"));
+
+        // Initialize command interface
+        Cmd cmd(coms);
+        
+        // Run the command loop
+        cmd.run();
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+    
+    return 0;
+}
+
+// Cmd.hpp
+
+class Cmd {
+public:
+    explicit Cmd(std::vector<std::shared_ptr<COM>>& coms);
+    void addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func);
+    void run();
+    void executeCommand(const std::string& input);
+
+
+private:
+    std::unordered_map<std::string, Command> commands;
+    std::vector<std::shared_ptr<COM>> comList;
+};
+
+// Cmd.cpp
+
+std::vector<std::string> parseCommand(const std::string& input) {
+    std::vector<std::string> args;
+    std::istringstream iss(input);
+    std::string token;
+    bool inQuotes = false;
+    std::string quotedString;
+
+    while (std::getline(iss, token, ' ')) {
+        if (!token.empty()) {
+            if (token.front() == '"' && !inQuotes) {
+                inQuotes = true;
+                quotedString = token.substr(1);
+            } else if (token.back() == '"' && inQuotes) {
+                inQuotes = false;
+                quotedString += " " + token.substr(0, token.length() - 1);
+                args.push_back(quotedString);
+            } else if (inQuotes) {
+                quotedString += " " + token;
+            } else {
+                args.push_back(token);
+            }
+        }
+    }
+    return args;
+}
+
+void parseMacAddress(const std::string& macStr, std::array<uint8_t, 6>& dstMac) {
+    std::stringstream ss(macStr);
+    std::string byte;
+    int i = 0;
+
+    while (std::getline(ss, byte, ':')) {
+        if (i >= 6) {
+            throw std::runtime_error("Invalid MAC address format.");
+        }
+        dstMac[i++] = static_cast<uint8_t>(std::stoi(byte, nullptr, 16));
+    }
+
+    if (i != 6) {
+        throw std::runtime_error("Incomplete MAC address.");
+    }
+}
+
+Cmd::Cmd(std::vector<std::shared_ptr<COM>>& coms) : comList(coms) {
+
+    std::cout << "Cmd initialized with existing COM instances.\n";
+
+    // Register built-in commands
+    addCommand("send", [this](const std::vector<std::string>& args) {
+        if (args.size() < 4) {  // 6 bytes src MAC, 6 bytes dst MAC, at least 1-byte payload
+            std::cerr << "Usage: send <dce_index> <dst_mac> <src_mac> <hex_data...>" << std::endl;
+            return;
+        }
+
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+
+        std::array<uint8_t, 6> dstMac;
+        std::array<uint8_t, 6> srcMac;
+
+        // Parse destination MAC
+        parseMacAddress(args[1], dstMac);
+
+        // Parse source MAC
+        parseMacAddress(args[1], srcMac);
+
+        std::vector<uint8_t> payload;
+        std::stringstream ss(args[3]);
+        std::string byte;
+
+        while (std::getline(ss, byte, ':')) {
+            payload.push_back(static_cast<uint8_t>(std::stoi(byte, nullptr, 16)));
+        }
+
+        // Construct the EthernetFrame correctly
+        EthernetFrame frame(srcMac, dstMac, payload);
+
+        // Now call transmitFrame() with the correct type
+        comList[dceIndex]->transmitFrame(frame);
+    });
+
+    addCommand("recv", [this](const std::vector<std::string>& args) {
+        if (args.empty()) {
+            std::cerr << "Usage: recv <dce_index>" << std::endl;
+            return;
+        }
+        int dceIndex = std::stoi(args[0]);
+        if (dceIndex < 0 || dceIndex >= comList.size()) {
+            std::cerr << "Invalid DCE index." << std::endl;
+            return;
+        }
+        std::vector<uint8_t> packet = comList[dceIndex]->getNextPacket();
+        std::cout << "Received packet: ";
+        for (uint8_t byte : packet) {
+            printf("%02X ", byte);
+        }
+        std::cout << std::endl;
+    });
+}
+
+void Cmd::addCommand(const std::string& name, std::function<void(const std::vector<std::string>&)> func) {
+    commands.emplace(name, Command(name, func));
+}
+
+void Cmd::executeCommand(const std::string& input) {
+    std::vector<std::string> args = parseCommand(input);
+
+    if (args.empty()) {
+        std::cerr << "Error: Empty command string" << std::endl;
+        return;
+    }
+
+    std::string commandName = args[0];  // First argument is the command name
+    auto it = commands.find(commandName);
+    if (it != commands.end()) {
+        args.erase(args.begin());  // Remove command name from args before passing
+        it->second.execute(args);
+    } else {
+        std::cerr << "Command not found: " << commandName << std::endl;
+    }
+}
+
+void Cmd::run() {
+    std::cout << "Cmd loop running... Type 'exit' to quit." << std::endl;
+    std::string input;
+    while (true) {
+        std::cout << "> ";
+        std::getline(std::cin, input);
+        if (input == "exit") break;
+        executeCommand(input);
+    }
+}
+
+// COM.hpp
+
+constexpr std::array<const char*, 6> MAC_ADDRESSES = {
+    "00:11:22:33:44:00", "00:11:22:33:44:01", "00:11:22:33:44:02",
+    "00:11:22:33:44:03", "00:11:22:33:44:04", "00:11:22:33:44:05"
+};
+
+class COM {
+public:
+    COM(const std::string& tapName, const std::string& macAddress);
+
+    void transmitFrame(const EthernetFrame& frame);  // Updated signature
+
+    void attach(std::shared_ptr<IObserver> observer);
+    void detach(std::shared_ptr<IObserver> observer);
+    void notify(const std::vector<uint8_t>& packet);
+
+    void startCapture();
+    void stopCapture();
+
+    std::vector<uint8_t> getNextPacket();
+    std::string getMacAddress() const;
+
+private:
+    int tapFd;
+    std::string tapName;
+    std::string macAddress;
+    pcap_t* pcapHandle;
+    libnet_t* lnet;
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    std::queue<std::vector<uint8_t>> rxBuffer;
+    std::mutex bufferMutex;
+    std::vector<std::shared_ptr<IObserver>> observers;
+    bool running;
+    std::thread captureThread;
+
+    bool initializeTAP();
+    bool initializeLibnet();
+    bool initializePcap();
+
+    static void packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
+
+    static void getNextPacket(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet);
+};
+
+// COM.cpp
+
+COM::COM(const std::string& tapName, const std::string& macAddress)
+    : tapName(tapName), macAddress(macAddress), tapFd(-1), lnet(nullptr), pcapHandle(nullptr) {
+
+    if (!initializeTAP()) {
+        throw std::runtime_error("Failed to initialize TAP device " + tapName);
+    }
+    if (!initializeLibnet()) {
+        throw std::runtime_error("Failed to initialize libnet: " + std::string(errbuf));
+    }
+    if (!initializePcap()) {
+        throw std::runtime_error("Failed to initialize pcap for " + tapName);
+    }
+
+    std::cout << "COM initialized for " << tapName << " with MAC " << macAddress << "\n";
+}
+
+// Initialize TAP device
+bool COM::initializeTAP() {
+    tapFd = open("/dev/net/tun", O_RDWR);
+    if (tapFd < 0) {
+        std::cerr << "Failed to open /dev/net/tun\n";
+        return false;
+    }
+
+    struct ifreq ifr = {};
+    strncpy(ifr.ifr_name, tapName.c_str(), IFNAMSIZ);
+    ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
+    if (ioctl(tapFd, TUNSETIFF, &ifr) < 0) {
+        std::cerr << "Failed to create TAP device " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    // Bring the interface up
+    std::string cmd = "ip link set " + tapName + " up";
+    if (std::system(cmd.c_str()) != 0) {
+        std::cerr << "Failed to bring TAP device up: " << tapName << "\n";
+        close(tapFd);
+        return false;
+    }
+
+    std::cout << "Created TAP device: " << tapName << std::endl;
+    return true;
+}
+
+// Initialize libnet
+bool COM::initializeLibnet() {
+    lnet = libnet_init(LIBNET_LINK, tapName.c_str(), errbuf);
+    if (!lnet) {
+        std::cerr << "Libnet init failed for " << tapName << ": " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Libnet initialized for " << tapName << "\n";
+    return true;
+}
+
+// Initialize pcap
+bool COM::initializePcap() {
+    pcapHandle = pcap_open_live(tapName.c_str(), BUFSIZ, 1, 1000, errbuf);
+    if (!pcapHandle) {
+        std::cerr << "Failed to initialize pcap: " << errbuf << "\n";
+        return false;
+    }
+    std::cout << "Pcap initialized for " << tapName << "\n";
+    return true;
+}
+
+void COM::transmitFrame(const EthernetFrame& frame) {
+    libnet_clear_packet(lnet);
+
+    libnet_ptag_t ethernetTag = libnet_build_ethernet(
+        frame.getDstMac().data(), frame.getSrcMac().data(),
+        ETHERTYPE_IP, frame.getPayload().data(), frame.getPayload().size(),
+        lnet, 0
+    );
+
+    if (ethernetTag == -1) {
+        throw std::runtime_error("Failed to build Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+
+    int bytesWritten = libnet_write(lnet);
+    if (bytesWritten == -1) {
+        throw std::runtime_error("Failed to send Ethernet frame: " + std::string(libnet_geterror(lnet)));
+    }
+}
+
+void COM::attach(std::shared_ptr<IObserver> observer) {
+    observers.push_back(observer);
+}
+
+void COM::detach(std::shared_ptr<IObserver> observer) {
+    observers.erase(std::remove_if(observers.begin(), observers.end(),
+    [&observer](const std::shared_ptr<IObserver>& o) { return o == observer; }),
+    observers.end());
+}
+
+void COM::notify(const std::vector<uint8_t>& packet) {
+    for (auto& observer : observers) {
+        observer->update(packet);
+    }
+}
+
+void COM::startCapture() {
+    running = true;
+    captureThread = std::thread([this]() {
+        pcap_loop(pcapHandle, 0, packetHandler, reinterpret_cast<u_char*>(this));
+    });
+}
+
+void COM::stopCapture() {
+    running = false;
+    pcap_breakloop(pcapHandle);
+    if (captureThread.joinable()) {
+        captureThread.join();
+    }
+}
+
+void COM::packetHandler(u_char* userData, const struct pcap_pkthdr* pkthdr, const u_char* packet) {
+    COM* comInstance = reinterpret_cast<COM*>(userData);
+    
+    std::vector<uint8_t> packetData(packet, packet + pkthdr->caplen);
+
+    {
+        std::lock_guard<std::mutex> lock(comInstance->bufferMutex);
+        comInstance->rxBuffer.push(packetData);
+    }
+
+    comInstance->notify(packetData);
+}
+
+std::vector<uint8_t> COM::getNextPacket() {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    if (!rxBuffer.empty()) {
+        std::vector<uint8_t> packet = rxBuffer.front();
+        rxBuffer.pop();
+        return packet;
+    }
+    return {}; // Return empty if no packets available
+}
+
+std::string COM::getMacAddress() const {
+    return macAddress;
+}
+
+// Command.hpp
+
+using CommandFunction = std::function<void(const std::vector<std::string>&)>;
+
+class Command {
+public:
+    Command(const std::string& name, CommandFunction func);
+    void execute(const std::vector<std::string>& args) const;
+    const std::string& getName() const;
+
+private:
+    std::string name;
+    CommandFunction func;
+};
+
+// Command.cpp
+
+Command::Command(const std::string& name, CommandFunction func)
+    : name(name), func(func) {}
+
+void Command::execute(const std::vector<std::string>& args) const {
+    func(args);
+}
+
+const std::string& Command::getName() const {
+    return name;
+}
+
+// EthernetFrame.hpp
+
+class EthernetFrame {
+public:
+    EthernetFrame(const std::array<uint8_t, 6>& srcMac, 
+                  const std::array<uint8_t, 6>& dstMac, 
+                  const std::vector<uint8_t>& payload);
+
+    std::vector<uint8_t> serialize() const;
+    static EthernetFrame deserialize(const std::vector<uint8_t>& data);
+
+    void setSrcMac(const std::array<uint8_t, 6>& mac);
+    void setDstMac(const std::array<uint8_t, 6>& mac);
+    void setPayload(const std::vector<uint8_t>& data);
+    
+    const std::array<uint8_t, 6>& getSrcMac() const;
+    const std::array<uint8_t, 6>& getDstMac() const;
+    const std::vector<uint8_t>& getPayload() const;  // Prevent accidental modification
+    
+    std::string macToString(const std::array<uint8_t, 6>& mac) const;
+    static std::array<uint8_t, 6> stringToMac(const std::string& macStr);
+
+private:
+    std::array<uint8_t, 6> srcMac;
+    std::array<uint8_t, 6> dstMac;
+    std::vector<uint8_t> payload;
+};
+
+// EthernetFrame.cpp
+
+EthernetFrame::EthernetFrame(const std::array<uint8_t, 6>& srcMac, 
+                             const std::array<uint8_t, 6>& dstMac, 
+                             const std::vector<uint8_t>& payload) 
+    : srcMac(srcMac), dstMac(dstMac), payload(payload) {}
+
+void EthernetFrame::setSrcMac(const std::array<uint8_t, 6>& mac) {
+    srcMac = mac;
+}
+
+void EthernetFrame::setDstMac(const std::array<uint8_t, 6>& mac) {
+    dstMac = mac;
+}
+
+void EthernetFrame::setPayload(const std::vector<uint8_t>& data) {
+    payload = data;
+}
+
+const std::array<uint8_t, 6>& EthernetFrame::getSrcMac() const {
+    return srcMac;
+}
+
+const std::array<uint8_t, 6>& EthernetFrame::getDstMac() const {
+    return dstMac;
+}
+
+const std::vector<uint8_t>& EthernetFrame::getPayload() const {
+    return payload;
+}
+
+// Serialize frame to a byte vector
+std::vector<uint8_t> EthernetFrame::serialize() const {
+    std::vector<uint8_t> data;
+    data.insert(data.end(), srcMac.begin(), srcMac.end());
+    data.insert(data.end(), dstMac.begin(), dstMac.end());
+    data.insert(data.end(), payload.begin(), payload.end());
+    return data;
+}
+
+// Deserialize raw bytes into an EthernetFrame
+EthernetFrame EthernetFrame::deserialize(const std::vector<uint8_t>& data) {
+    if (data.size() < 12) {
+        throw std::runtime_error("Invalid Ethernet frame size");
+    }
+
+    std::array<uint8_t, 6> src, dst;
+    std::copy(data.begin(), data.begin() + 6, src.begin());
+    std::copy(data.begin() + 6, data.begin() + 12, dst.begin());
+    
+    std::vector<uint8_t> payload(data.begin() + 12, data.end());
+    return EthernetFrame(src, dst, payload);
+}
+
+// Convert MAC address to string
+std::string EthernetFrame::macToString(const std::array<uint8_t, 6>& mac) const {
+    std::ostringstream oss;
+    for (size_t i = 0; i < mac.size(); ++i) {
+        if (i > 0) oss << ":";
+        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(mac[i]);
+    }
+    return oss.str();
+}
+
+// Convert string MAC address (e.g., "AA:BB:CC:DD:EE:FF") to array
+std::array<uint8_t, 6> EthernetFrame::stringToMac(const std::string& macStr) {
+    std::array<uint8_t, 6> mac{};
+    unsigned int values[6];
+    
+    if (sscanf(macStr.c_str(), "%x:%x:%x:%x:%x:%x", 
+               &values[0], &values[1], &values[2], 
+               &values[3], &values[4], &values[5]) != 6) {
+        throw std::invalid_argument("Invalid MAC address format");
+    }
+    
+    for (size_t i = 0; i < 6; ++i) {
+        mac[i] = static_cast<uint8_t>(values[i]);
+    }
+    return mac;
+}
+
+// RxObserver.hpp
+
+lass RxObserver : public IObserver {
+private:
+    std::queue<std::vector<uint8_t>> rxBuffer;
+    std::mutex bufferMutex;
+
+public:
+    void update(const std::vector<uint8_t>& packet) override;
+    std::vector<uint8_t> getNextPacket();
+};
+
+// RxObserver.cpp
+
+void RxObserver::update(const std::vector<uint8_t>& packet) {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    rxBuffer.push(packet);
+//    std::cout << "RxObserver received packet of size: " << packet.size() << " bytes" << std::endl;
+}
+
+std::vector<uint8_t> RxObserver::getNextPacket() {
+    std::lock_guard<std::mutex> lock(bufferMutex);
+    if (!rxBuffer.empty()) {
+        std::vector<uint8_t> packet = rxBuffer.front();
+        rxBuffer.pop();
+        return packet;
+    }
+    return {};  // Return empty if no packets available
+}
+
+// ISubject.hpp
+
+class ISubject {
+public:
+    virtual ~ISubject() = default;
+    virtual void attach(std::shared_ptr<IObserver> observer) = 0;
+    virtual void detach(std::shared_ptr<IObserver> observer) = 0;
+    virtual void notify(const std::vector<uint8_t>& packet) = 0;
+};
+
+// IObserver.hpp
+
+class IObserver {
+public:
+    virtual ~IObserver() = default;
+    virtual void update(const std::vector<uint8_t>& packet) = 0;
+};
+
+/////////////////////////////////////////////////
+
+Ok, that's a pretty good take on things.
+
+At one point you said that each component creates TCP links to each of its two neighbors but in the mpp all four components are neighbors, I wasn't clear on that and I apologize.  So the Cmd will have 6 TCP channels a DTE/DCE pair for each of the other three components totalling 6.
+
+I don't want the Command class to have anything more than it has now... not at this point anyhow.
+
+At some point in the future, when I get the linux tap figured out, I'd like to use ethernet for IPC.  Now that we're going with TCP, however, I'd like to do it in a way that it could be switched to ethernet easily.  Like maybe we can do Ethernet over TCP and maybe we could even make the TCP part transparent.
+
+I'm not particlar about using libnet and/or pcap, and they're probably not needed anymore now that sockets are getting the call to action, right?
+
+As far as handling dropped connections goes let's just not really consider it for now.  During the setting up of connections we should report on failure but after that it's the users responsibility and can use linux tools of various sorts, or perhaps other programs to monitor the program's execution.  I don't want complexity at this point.  I want things very simple where basically it's just 6 TCP connections.  The existing commands are:
+
+send which takes arguments of channel, dstMac, srcMac and payload.  Here's an example:
+
+send 0 02:00:00:00:01:01 02:00:00:00:00:01 48:65:6C:6C:6F:20:63:6D:64:30:20:66:72:6F:6D:20:68:75:64:30:20:21:21:21
+
+recv takes one argument for the channel, 0-5 and returns the oldest packet in the RxBuffer.
+
+I'm no expert on IP addresses but I think I'd like addresses in the 10's as I see many examples of experimental code using the 10's such as:
+
+Cmd:
+10.0.0.1
+10.0.0.2
+10.0.0.3
+10.0.0.4
+10.0.0.5
+10.0.0.6
+
+At some point I'll clone the Cmd repo into another directory and we'll simulate other coponents such as the hud component, the net component or the Cnl component and we'll then assign address in those clone directories such as:
+
+Hud:
+10.0.1.1
+10.0.1.2
+10.0.1.3
+10.0.1.4
+10.0.1.5
+10.0.1.6
+
+etc....
+
+I'm a rooky at TCP and so I'll defer to your wisdom regarding the creation of the TCP channels.  I hope that the requirements will steer your judgement over how to handle creation, ownership and lifecycle of the TCP channels.
+
+Great questions!  I'm enjoying our chat.  I'm eager to hear your comments and questions.
+
+///////////////////////////////////////
+
+I've got a feeling that things will make more sense if we talk more in terms of UDP and less in terms of TCP.  I just looked up UDP.  I'm looking for a method where a channel can be created and traffic can be sent on it without any care at all where it's going.  Also, I'd like the listeners to receive on channels whether there is an active sender or not.  If traffic arrives fine, if it doesn't that's fine to.  The user will issue recv commands as he sees fit and issue send commands as he sees fit.  Keep in mind that in the current implemtation of these channels the intent is that the rx direction is not used.  When the cmd component, for instance, transmits to the hud, cnl or net components it'll use one of the UDP channels that it thinks of as the DTE in the DTE/DCE pair going to and coming from each other component and uses the tx side of the UDP channel to do so, but isn't concerned about the rx channel, even though there's one there.  Is this possible in UDP?  To operate recklessly like that?  Unidirectionally?  I'm a rooky with UDP and TCP and socket programming in general and I'm not even sure if what I'm trying to achieve is possible with UDPs or TCP.
+
+Is this architecture taking shape?  I'd like to hear your questions and comments.
+
+//////////////////////////////////////////
+
+You comment here is spot on:
+
+This makes sure all sending is one-way only, with no "feedback loop" unless a higher layer decides to do so.
+
+Yes.  The way I want what we're doing with cmd might seem sloppy and silly but just think of it as a very low level component and all of the worry of protocol, for instance, has to be handled by software using the send and recv commands.  I'm open to the idea of maybe having a separate command or two like, maybe for instance, ping.  But that's what the Command pattern can be used for later - adding another command to the Command objects.
+
+I like your idea for addressing so just go ahead with that.  Yeah the Cmd can be this:
+
+10.0.0.1:5000  (Channel 0)
+10.0.0.1:5001  (Channel 1)
+10.0.0.1:5002  (Channel 2)
+10.0.0.1:5003  (Channel 3)
+10.0.0.1:5004  (Channel 4)
+10.0.0.1:5005  (Channel 5)
+
+and we can work out addresses for the others after we clone and set them up.
+
+With regards to your code generation would you like to keep any of the code and/or files from the existing code that I sent to you or would you like to start fresh?  One way we can transfer the code you generate to me is in chat or canvas you put all of the implementations right in the declarations all in one file called main.cpp and you can wire it together in the main().  I can then split it apart into separtate .hpp and .cpp files, on a per class basis.
+
+Do you think you understand the problem?  Can you restate the problem and then state what your approach to solving it would be, without actually generating the code yet?
+
+////////////////////////////////////////
+
+## Problem Restatement ##
+
+- 2.
+Cmd doesn't really ignore the rx channels.  The rx channels are there and perfectly funcional, if a user cares to issue a recv command.  They're not ignored at all, it's just that to begin with at least each of those bi-directional UDP paths will use its tx of its DTE channels and only its rx of its DCE channels.
+
+- 6.
+I think we should ditch the mac addresses, and go with ip and port for now.  Sound good?
+
+## Questions Before Proceeding ##
+
+- 1.Markdown: Disable Linting
+
+If recv is called and there is nothing there it just returns empty.
+
+- 2.
+I think we should take the mac addresses out of the command.  For now let's take the mac addresses out completely.  For now let's act as though we have no intention of using mac at all and just keep it as simple as possible.
+
+- 3.
+We can make a little repl interface as you're inclined.  In Cmd.cpp in the code I sent you was a run() method which is probably somehing like what you're thinking.  The parse helper functions like parseCommand() or parseMacAddress() might be interesting for you to look at - they both worked pretty good.  But it's up to you to use what you want.
+
+//////////////////////////////////
+
+Hey it looks great.  I have it in VSCode and I stepped through it.
+
+It failed with this:
+
+Bind failed: Cannot assign requested address
+
+On this line:
+
+        channels.emplace(i, UDPChannel("10.0.0.1", 5000 + i));
+
+Any idea why that might have been?
+
+///////////////////////////////////
+
+I've altered a line in the code and I wonder what you think of it.  I changed this:
+
+        if (tokens[0] == "send" && tokens.size() == 4) {
+
+to:
+
+        if (tokens[0] == "send" && tokens.size() == 5) {
+
+wondering if there were 5, including send.  It seems to have got it to compile but the programs still fails in that it doesn't send a message but at least it compiles.  In the debugger the values look ok though.
+
+I also changed this:
+
+                SendCommand cmd(channels[ch], "10.0.0.1", 5000 + ch, tokens[3]);
+
+to this:
+
+                SendCommand cmd(channels[ch], "10.0.0.2", 5000 + ch, tokens[3]);
+
+thinking that the dst should probably be 10.0.0.2.
+
+What do you think about the changes I made?
+
+Here's some info an the basic network situation in the PC:
+
+root@PRED:/usr/local/cmd_clone/cmd# ip link show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether ec:b1:d7:52:8c:52 brd ff:ff:ff:ff:ff:ff
+    altname enp0s25
+root@PRED:/usr/local/cmd_clone/cmd# ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet 10.0.0.1/24 scope global lo
+       valid_lft forever preferred_lft forever
+    inet 10.0.0.2/24 scope global secondary lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host noprefixroute 
+       valid_lft forever preferred_lft forever
+2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether ec:b1:d7:52:8c:52 brd ff:ff:ff:ff:ff:ff
+    altname enp0s25
+    inet 192.168.0.101/24 brd 192.168.0.255 scope global dynamic noprefixroute eno1
+       valid_lft 545885sec preferred_lft 545885sec
+    inet6 fe80::dd1c:a023:16ba:f8a7/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever
+root@PRED:/usr/local/cmd_clone/cmd# 
+
+///////////////////////////////////////////////////
+
+When I run this gptcmd.cpp code with those changes I made, namely changing the number of args from 4 to 5 and changing the ip's to 0.0.0.0:
+
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <cstring>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+class UDPChannel {
+public:
+
+    UDPChannel() : ip(""), port(0), sockfd(-1) {}
+
+    UDPChannel(const std::string& ip, int port) : ip(ip), port(port) {
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd < 0) {
+            perror("Socket creation failed");
+            exit(1);
+        }
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = inet_addr(ip.c_str());
+        addr.sin_port = htons(port);
+        if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            perror("Bind failed");
+            exit(1);
+        }
+    }
+    
+    void send(const std::string& dst_ip, int dst_port, const std::string& message) {
+        sockaddr_in dest{};
+        dest.sin_family = AF_INET;
+        dest.sin_addr.s_addr = inet_addr(dst_ip.c_str());
+        dest.sin_port = htons(dst_port);
+        sendto(sockfd, message.c_str(), message.size(), 0, (struct sockaddr*)&dest, sizeof(dest));
+    }
+    
+    std::string recv() {
+        char buffer[1024] = {0};
+        sockaddr_in sender{};
+        socklen_t sender_len = sizeof(sender);
+        ssize_t len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, MSG_DONTWAIT, (struct sockaddr*)&sender, &sender_len);
+        if (len > 0) {
+            buffer[len] = '\0';
+            return std::string(buffer);
+        }
+        return "";
+    }
+    
+    ~UDPChannel() { close(sockfd); }
+    
+private:
+    int sockfd;
+    std::string ip;
+    int port;
+};
+
+class Command {
+public:
+    virtual void execute() = 0;
+    virtual ~Command() = default;
+};
+
+class SendCommand : public Command {
+public:
+    SendCommand(UDPChannel& channel, const std::string& dst_ip, int dst_port, const std::string& message)
+        : channel(channel), dst_ip(dst_ip), dst_port(dst_port), message(message) {}
+    
+    void execute() override { channel.send(dst_ip, dst_port, message); }
+    
+private:
+    UDPChannel& channel;
+    std::string dst_ip;
+    int dst_port;
+    std::string message;
+};
+
+class RecvCommand : public Command {
+public:
+    RecvCommand(UDPChannel& channel) : channel(channel) {}
+    
+    void execute() override {
+        std::string msg = channel.recv();
+        if (!msg.empty()) std::cout << "Received: " << msg << std::endl;
+        else std::cout << "No data available" << std::endl;
+    }
+    
+private:
+    UDPChannel& channel;
+};
+
+void run(std::unordered_map<int, UDPChannel>& channels) {
+    std::string line;
+    while (true) {
+        std::cout << "> ";
+        std::getline(std::cin, line);
+        if (line == "exit") break;
+        
+        std::vector<std::string> tokens;
+        std::istringstream iss(line);
+        std::string token;
+        while (iss >> token) tokens.push_back(token);
+        
+        if (tokens.empty()) continue;
+        if (tokens[0] == "send" && tokens.size() == 5) {
+            int ch = std::stoi(tokens[1]);
+            if (channels.find(ch) != channels.end()) {
+                SendCommand cmd(channels[ch], "0.0.0.0", 5000 + ch, tokens[3]);
+                cmd.execute();
+            }
+        } else if (tokens[0] == "recv" && tokens.size() == 2) {
+            int ch = std::stoi(tokens[1]);
+            if (channels.find(ch) != channels.end()) {
+                RecvCommand cmd(channels[ch]);
+                cmd.execute();
+            }
+        } else {
+            std::cout << "Invalid command" << std::endl;
+        }
+    }
+}
+
+int main() {
+    std::unordered_map<int, UDPChannel> channels;
+    for (int i = 0; i < 6; ++i) {
+        channels.emplace(i, UDPChannel("0.0.0.0", 5000 + i));
+    }
+    run(channels);
+    return 0;
+}
+
+at this point in the code:
+
+    void execute() override { channel.send(dst_ip, dst_port, message); }
+
+the arguments seem to be screwed up because the debugger gives these values:
+
+channel
+    - sockfd = 3
+    - ip = "0.0.0.0"
+    - port 5000
+
+dst_ip = "0.0.0.0"
+dst_port = 5000
+message = "0.0.0.0"
+
+A definite hint that something is wrong with the argument handling because message I'm pretty sure shouldn't be "0.0.0.0".
+
+Please double check if you expect those values at that point in the code execution.
+
+Can you please double check the correctness of your code from the listing in this message above?
+
+////////////////////////////////////////////////////
+
+At the time this code is executed:
+
+        dest.sin_port = htons(dst_port);
+        sendto(sockfd, message.c_str(), message.size(), 0, (struct sockaddr*)&dest, sizeof(dest));
+
+the debugger shows that dest.sin_port = 34835.  I put in 5000 at the command line though.  My command was this:
+
+> send 0 0.0.0.0 5000 hello
+
+Can you send me a fixed gptcmd.cpp please?
+
+//////////////////////////////////////////////////////////
+
+At the time this line is executed:
+
+        ssize_t bytes_sent = sendto(sockfd, message.c_str(), message.size(), 0, (struct sockaddr*)&dest, sizeof(dest));
+
+
+the debugger says that:
+
+sockfd = 3
+dest.sin_family = 2
+dest.sin_port = 34835
+dst_ip = "0.0.0.0"
+dst_port = 5000
+message = "hello"
+
+This is the command I put in:
+
+> send 0 0.0.0.0 5000 hello
+
+and this is the output:
+
+sendto failed: Bad file descriptor
+>
+
+Any idea what the problem is, partner?  Please fix it and send me a new updated and all fixed up gptcmd.cpp.
+
+/////////////////////////////////////////////
+
+I ran it and got this again:
+
+> send 0 127.0.0.1 5001 hello
+sendto failed: Bad file descriptor
+
+but at the time of execution dest.sin_port = 35091
+
+Also at that time:
+
+this->port = 5000
+
+while:
+
+dst_port = 5000
+
+I'd all of the puzzling numbers I think it's appropriate that there was no traffic seen by wireshark, nor tcpdump.
+
+If you could, partner, I'd like it if you'd send me an updated and fixed gptcmd.cpp please.  Let me know if my feedback is inadequate.  I'm here to support you 100% and I'm grateful for your generosity with your knowledge and capabilities.
+
+//////////////////////////////////////////////////////////////
+
+Checkout how I changed the code in a couple places.  I commented out your code.  I directly set the port and the dst_port to 5000 and it went into dest.sin_port reading 5000 in the debugger.  I think it's an unsigned int 16 or some sort:
+
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <cstring>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+class UDPChannel {
+public:
+    UDPChannel() : ip(""), port(0), sockfd(-1) {}
+
+    UDPChannel(const std::string& ip, int port) : ip(ip), port(port) {
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd < 0) {
+            perror("Socket creation failed");
+            exit(1);
+        }
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = inet_addr(ip.c_str());
+//        addr.sin_port = htons(port);
+        addr.sin_port = port;
+        if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            perror("Bind failed");
+            exit(1);
+        }
+    }
+    
+    void send(const std::string& dst_ip, int dst_port, const std::string& message) {
+        if (sockfd < 0) {
+            std::cerr << "Socket not initialized properly!" << std::endl;
+            return;
+        }
+        sockaddr_in dest{};
+        dest.sin_family = AF_INET;
+        dest.sin_addr.s_addr = inet_addr(dst_ip.c_str());
+//        dest.sin_port = htons(dst_port);
+        dest.sin_port = dst_port;
+        ssize_t bytes_sent = sendto(sockfd, message.c_str(), message.size(), 0, (struct sockaddr*)&dest, sizeof(dest));
+        if (bytes_sent < 0) {
+            perror("sendto failed");
+        }
+    }
+    
+    std::string recv() {
+        char buffer[1024] = {0};
+        sockaddr_in sender{};
+        socklen_t sender_len = sizeof(sender);
+        ssize_t len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, MSG_DONTWAIT, (struct sockaddr*)&sender, &sender_len);
+        if (len > 0) {
+            buffer[len] = '\0';
+            return std::string(buffer);
+        }
+        return "";
+    }
+    
+    ~UDPChannel() { close(sockfd); }
+    
+private:
+    int sockfd;
+    std::string ip;
+    int port;
+};
+
+class Command {
+public:
+    virtual void execute() = 0;
+    virtual ~Command() = default;
+};
+
+class SendCommand : public Command {
+public:
+    SendCommand(UDPChannel& channel, const std::string& dst_ip, int dst_port, const std::string& message)
+        : channel(channel), dst_ip(dst_ip), dst_port(dst_port), message(message) {}
+    
+    void execute() override { channel.send(dst_ip, dst_port, message); }
+    
+private:
+    UDPChannel& channel;
+    std::string dst_ip;
+    int dst_port;
+    std::string message;
+};
+
+class RecvCommand : public Command {
+public:
+    RecvCommand(UDPChannel& channel) : channel(channel) {}
+    
+    void execute() override {
+        std::string msg = channel.recv();
+        if (!msg.empty()) std::cout << "Received: " << msg << std::endl;
+        else std::cout << "No data available" << std::endl;
+    }
+    
+private:
+    UDPChannel& channel;
+};
+
+void run(std::unordered_map<int, UDPChannel>& channels) {
+    std::string line;
+    while (true) {
+        std::cout << "> ";
+        std::getline(std::cin, line);
+        if (line == "exit") break;
+        
+        std::vector<std::string> tokens;
+        std::istringstream iss(line);
+        std::string token;
+        while (iss >> token) tokens.push_back(token);
+        
+        if (tokens.empty()) continue;
+        if (tokens[0] == "send" && tokens.size() == 5) {
+            int ch = std::stoi(tokens[1]);
+            if (channels.find(ch) != channels.end()) {
+                int dst_port = std::stoi(tokens[3]);
+                SendCommand cmd(channels[ch], tokens[2], dst_port, tokens[4]);
+                cmd.execute();
+            } else {
+                std::cerr << "Invalid channel: " << ch << std::endl;
+            }
+        } else if (tokens[0] == "recv" && tokens.size() == 2) {
+            int ch = std::stoi(tokens[1]);
+            if (channels.find(ch) != channels.end()) {
+                RecvCommand cmd(channels[ch]);
+                cmd.execute();
+            } else {
+                std::cerr << "Invalid channel: " << ch << std::endl;
+            }
+        } else {
+            std::cout << "Invalid command" << std::endl;
+        }
+    }
+}
+
+int main() {
+    std::unordered_map<int, UDPChannel> channels;
+    for (int i = 0; i < 6; ++i) {
+        channels.emplace(i, UDPChannel("127.0.0.1", 5000 + i));
+    }
+    run(channels);
+    return 0;
+}
+
+Would this work with the following network setup:
+
+root@PRED:/usr/local/cmd_clone/cmd# ip link show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP mode DEFAULT group default qlen 1000
+    link/ether ec:b1:d7:52:8c:52 brd ff:ff:ff:ff:ff:ff
+    altname enp0s25
+root@PRED:/usr/local/cmd_clone/cmd# ip addr show
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet 10.0.0.1/24 scope global lo
+       valid_lft forever preferred_lft forever
+    inet 10.0.0.2/24 scope global secondary lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host noprefixroute 
+       valid_lft forever preferred_lft forever
+2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP group default qlen 1000
+    link/ether ec:b1:d7:52:8c:52 brd ff:ff:ff:ff:ff:ff
+    altname enp0s25
+    inet 192.168.0.101/24 brd 192.168.0.255 scope global dynamic noprefixroute eno1
+       valid_lft 530328sec preferred_lft 530328sec
+    inet6 fe80::dd1c:a023:16ba:f8a7/64 scope link noprefixroute 
+       valid_lft forever preferred_lft forever
+root@PRED:/usr/local/cmd_clone/cmd# 
+
+The command I entered was this:
+
+> send 0 127.0.0.1 5000 hello
+
+and I got this output again:
+
+sendto failed: Bad file descriptor
+
+and sockfd = 3, which I think it always does.
+
+Can you figure this out and send me an updated and corrected gptcmd.cpp please, partner?
+
+////////////////////////////////////
+
+In the constructor there's this:
+
+    UDPChannel(const std::string& ip, int port) : ip(ip), port(port) {
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+        if (sockfd < 0) {
+            perror("Socket creation failed");
+            exit(1);
+        }
+
+and then in send there's this:
+
+      void send(const std::string& dst_ip, int dst_port, const std::string& message) {
+        if (sockfd < 0) {
+            std::cerr << "Socket not initialized properly!" << std::endl;
+            return;
+        }
+
+is the send code rightfully absent this code that's present in the constuctor code:
+
+        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+It seems to me that in the debugger the sockfd is always 3 and sockfd 3 seems to be the only one that ever gets allocated.
+
+////////////////////////////////////////////
+
+Hey parter, woo hoo!!!  Crack open the champagne!  Look at the tcpdump output:
+
+17:33:52.142480 lo    In  IP localhost.5000 > localhost.5001: UDP, length 5
+        0x0000:  4500 0021 ec35 4000 4011 5094 7f00 0001  E..!.5@.@.P.....
+        0x0010:  7f00 0001 1388 1389 000d fe20 6865 6c6c  ............hell
+        0x0020:  6f                                       o
+
+and the output:
+
+> recv 0
+No data available
+> recv 1
+Received: hello
+> 
+
+Great work.  Thanks for the code.
+
+Ok, now that we've figured out this thing all the way through we have the proof of concept a lot further along, wouldn't you say?  And that's just absolutely great and I'm very happy about this.
+
+I have a question though.  I changed the message to "Hello Graham!!!" and then it said the >send command was invalid, because it took Graham!!! as an argument.  Is there a way I can put spaces in the message?  Like an escape sequence or something?  If not it's ok, I'll just use dashes or an underscore or something.
+
+I have this current well working program commited and pushed to github in a repo branch:
+
+https://github.com/ambersoj/cmd/tree/tcp_icp
+
+The local working directory for that branch is /usr/local/cmd_clone/cmd and I'd like to clone it to /usr/local/hud_clone/hud.  Then I want to customize it by changing references to cmd to hud and changing the IP ranges and then try to communicate with the send and recv commands between the two separately running programs, and that, partner, will be our IPC.
+
+/////////////////////////////////////////////////////
+>>>>>>> tcp_icp
 
 
 send 0 00:11:22:33:44:01 00:11:22:33:44:00 48:65:6c:6c:6f:20:74:61:70:31:2c:20:66:72:6f:6d:20:74:61:70:30:21:21:21
