@@ -150,7 +150,6 @@ void run(std::unordered_map<int, UDPChannel>& channels, CommandInvoker& invoker)
     struct pollfd pfd = { STDIN_FILENO, POLLIN, 0 };
     std::cout << "> ";
     while (true) {
-//        std::cout << "> ";
         std::cout.flush();
         invoker.executeCommands();
         if (poll(&pfd, 1, 100) > 0) {
