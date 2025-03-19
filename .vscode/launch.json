@@ -25,7 +25,7 @@
             "filterStdout": true,
             "filterStderr": true,
             "sourceFileMap": {
-                "/usr/local/cmd_clone/cmd": "${workspaceFolder}",
+                "/usr/local/mpp/cmd": "${workspaceFolder}",
             }
         }
     ]

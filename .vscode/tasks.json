@@ -7,7 +7,8 @@
             "command": "/usr/bin/g++",
             "args": [
                 "-g",
-                "${workspaceFolder}/cmd.cpp",
+                "${workspaceFolder}/main.cpp",
+                "${workspaceFolder}/Cmd.cpp",
                 "-o",
                 "${workspaceFolder}/cmd",
             ],
